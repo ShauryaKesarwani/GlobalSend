@@ -1,0 +1,24 @@
+# deps
+node_modules/
+
+# bun
+bun.lockb
+
+# build output
+dist/
+build/
+
+# coverage
+coverage/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+
+# misc
+.DS_Store
+*.tsbuildinfo
