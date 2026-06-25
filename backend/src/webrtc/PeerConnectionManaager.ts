@@ -32,6 +32,7 @@ export class PeerConnectionManager {
   }
 
   // Called when WS receives { type: "offer", data: ..., from: remotePeerId }
+  // Called by receiver after receiving offer
   public async handleOffer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
     const answer = await this.pc!.createAnswer();
@@ -46,6 +47,7 @@ export class PeerConnectionManager {
   }
 
   // Called when WS receives { type: "answer", data: ..., from: remotePeerId }
+  // Called by sender after receiving answer
   public async handleAnswer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
   }
