@@ -1,26 +1,31 @@
-import { peers } from "./store";
 import { broadcast } from "./broadcast";
+import { peers } from "./store";
 import { clients } from "../ws/store";
+
+export function removePeer(id: string) {
+  const hadPeer = peers.delete(id);
+  clients.delete(id);
+
+  if (hadPeer) {
+    console.log("Removed peer:", id);
+    broadcast({
+      type: "peer_left",
+      id,
+    });
+  }
+}
 
 export function startCleanupLoop() {
   setInterval(() => {
     const now = Date.now();
 
     for (const [id, peer] of peers) {
-      const dead = now - peer.lastSeen > 500000;
-      if (dead) {
-        const socket = clients.get(id);
-        socket?.close();
+      const dead = now - peer.lastSeen > 45_000;
+      if (!dead) continue;
 
-        peers.delete(id);
-        clients.delete(id);
-        console.log("Removed dead peer:", id);
-
-        broadcast({
-          type: "peer_leave",
-          id,
-        });
-      }
+      const socket = clients.get(id);
+      socket?.close();
+      removePeer(id);
     }
-  }, 10000);
+  }, 10_000);
 }

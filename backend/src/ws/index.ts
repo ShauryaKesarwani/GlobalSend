@@ -1,7 +1,8 @@
 import { upgradeWebSocket } from "hono/bun";
-import { messageSchema } from "../validation/message";
 import { peers } from "../presence/store";
 import { broadcast } from "../presence/broadcast";
+import { removePeer } from "../presence/cleanup";
+import { messageSchema } from "../validation/message";
 import { clients } from "./store";
 
 export const wsRoute = upgradeWebSocket((c) => {
@@ -45,17 +46,18 @@ export const wsRoute = upgradeWebSocket((c) => {
           );
           break;
 
-        case "heartbeat":
+        case "heartbeat": {
           const peer = peers.get(id);
           if (peer) peer.lastSeen = Date.now();
           break;
+        }
 
         case "offer":
         case "answer":
         case "candidate":
         case "transfer-invite":
         case "transfer-accept":
-        case "transfer-decline":
+        case "transfer-decline": {
           const target = clients.get(data.to);
           if (target) {
             target.send(JSON.stringify({ ...data, from: id }));
@@ -63,12 +65,13 @@ export const wsRoute = upgradeWebSocket((c) => {
             console.warn("Target not found:", data.to);
           }
           break;
+        }
       }
     },
 
     onClose() {
-      clients.delete(id);
       console.log("CLOSE:", id);
+      removePeer(id);
     },
   };
 });
