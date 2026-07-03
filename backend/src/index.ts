@@ -5,6 +5,7 @@ import { wsRoute } from "./ws/index";
 import { startCleanupLoop } from "./presence/cleanup";
 
 const app = new Hono();
+const port = Number(process.env.PORT) || 4000;
 
 startCleanupLoop();
 
@@ -13,9 +14,9 @@ app.get("/ws", wsRoute);
 // app.get("all_peers", (c) => {
 //   for
 // });
-
+console.log(`Server running on http://localhost:${port}`);
 serve({
   fetch: app.fetch,
-  port: 3001,
+  port: port,
   websocket,
 });

@@ -1,4 +1,5 @@
 import { PeerConnectionManager } from "@/webrtc/PeerConnectionManager";
+import { env } from "@/src/config";
 
 type Peer = { id: string; alias: string };
 
@@ -26,19 +27,25 @@ type Handlers = {
   onTransferDeclined: (from: string) => void;
   onDataChannelOpen: (peerId: string) => void;
   onDataChannelMessage: (peerId: string, data: string | ArrayBuffer) => void;
-  onFileStart: (peerId: string, file: {
-    id: string;
-    name: string;
-    mimeType: string;
-    size: number;
-    chunkCount: number;
-  }) => void;
-  onFileProgress: (peerId: string, progress: {
-    id: string;
-    transferredBytes: number;
-    totalBytes: number;
-    direction: "send" | "receive";
-  }) => void;
+  onFileStart: (
+    peerId: string,
+    file: {
+      id: string;
+      name: string;
+      mimeType: string;
+      size: number;
+      chunkCount: number;
+    },
+  ) => void;
+  onFileProgress: (
+    peerId: string,
+    progress: {
+      id: string;
+      transferredBytes: number;
+      totalBytes: number;
+      direction: "send" | "receive";
+    },
+  ) => void;
   onFileComplete: (peerId: string, file: FileTransferRecord) => void;
   onLog: (msg: string) => void;
 };
@@ -56,7 +63,7 @@ export class WSClient {
     this.alias = alias;
     this.handlers = handlers;
 
-    this.ws = new WebSocket(`ws://localhost:3001/ws?id=${sessionId}`);
+    this.ws = new WebSocket(`ws://${env.apiUrl}/ws?id=${sessionId}`);
 
     this.ws.onopen = () => {
       this.log("WS connected");
@@ -92,7 +99,9 @@ export class WSClient {
         this.handlers.onTransferInvite(msg.from, msg.file);
         break;
       case "transfer-accept":
-        this.log(`Transfer accepted by ${msg.from} - starting WebRTC as sender`);
+        this.log(
+          `Transfer accepted by ${msg.from} - starting WebRTC as sender`,
+        );
         this.handlers.onTransferAccepted(msg.from);
         this.initAsSender(msg.from);
         break;
@@ -101,7 +110,9 @@ export class WSClient {
         break;
       case "offer":
         this.log(`Offer received from ${msg.from} - initialising as receiver`);
-        void this.getOrCreatePeer(msg.from).then((pc) => pc.handleOffer(msg.data));
+        void this.getOrCreatePeer(msg.from).then((pc) =>
+          pc.handleOffer(msg.data),
+        );
         break;
       case "answer":
         void this.peers.get(msg.from)?.handleAnswer(msg.data);
@@ -117,7 +128,9 @@ export class WSClient {
     pc.initAsSender();
   }
 
-  private async getOrCreatePeer(remotePeerId: string): Promise<PeerConnectionManager> {
+  private async getOrCreatePeer(
+    remotePeerId: string,
+  ): Promise<PeerConnectionManager> {
     const existing = this.peers.get(remotePeerId);
     if (existing) return existing;
 
@@ -138,7 +151,9 @@ export class WSClient {
     };
 
     pc.onMessage = (data) => {
-      this.log(`DataChannel message from ${remotePeerId}: ${typeof data === "string" ? data : "[binary]"}`);
+      this.log(
+        `DataChannel message from ${remotePeerId}: ${typeof data === "string" ? data : "[binary]"}`,
+      );
       this.handlers.onDataChannelMessage(remotePeerId, data);
     };
 

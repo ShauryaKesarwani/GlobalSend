@@ -60,6 +60,7 @@ export class PeerConnectionManager {
     this.remotePeerId = remotePeerId;
   }
 
+  // Called by sender after receiving transfer-accept
   public initAsSender() {
     this.createPeerConnection();
     this.dc = this.pc!.createDataChannel("file-transfer", { ordered: true });
@@ -67,6 +68,7 @@ export class PeerConnectionManager {
     void this.createAndSendOffer();
   }
 
+  // Called by receiver after sending transfer-accept
   public initAsReceiver() {
     this.createPeerConnection();
     this.pc!.ondatachannel = (event) => {
@@ -75,6 +77,8 @@ export class PeerConnectionManager {
     };
   }
 
+  // Called when WS receives { type: "offer", data: ..., from: remotePeerId }
+  // Called by receiver after receiving offer
   public async handleOffer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
     const answer = await this.pc!.createAnswer();
@@ -88,14 +92,18 @@ export class PeerConnectionManager {
     );
   }
 
+  // Called when WS receives { type: "answer", data: ..., from: remotePeerId }
+  // Called by sender after receiving answer
   public async handleAnswer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
   }
 
+  // Called when WS receives { type: "candidate", data: ..., from: remotePeerId }
   public async handleCandidate(candidate: RTCIceCandidateInit) {
     await this.pc!.addIceCandidate(candidate);
   }
 
+  // Called by sender/receiver to send arbitrary data (first if data checks string & second for ArrayBuffer auto done by ts)
   public sendMessage(data: string | ArrayBuffer) {
     if (this.dc?.readyState !== "open") return;
     if (typeof data === "string") {
