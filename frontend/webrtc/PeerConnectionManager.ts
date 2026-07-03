@@ -1,5 +1,5 @@
 const CONTROL_PREFIX = "__rift_ctrl__";
-const CHUNK_SIZE = 64 * 1024;
+const CHUNK_SIZE = 256 * 1024; //256kb
 
 type FileManifest = {
   kind: "file-meta";
@@ -270,8 +270,8 @@ export class PeerConnectionManager {
   private async waitForBufferedAmountLow() {
     if (!this.dc) return;
 
-    const highWaterMark = 4 * CHUNK_SIZE;
-    const lowWaterMark = 2 * CHUNK_SIZE;
+    const highWaterMark = 32 * CHUNK_SIZE;
+    const lowWaterMark = 16 * CHUNK_SIZE;
 
     if (this.dc.bufferedAmount <= highWaterMark) return;
 
