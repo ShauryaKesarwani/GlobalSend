@@ -9,6 +9,14 @@ const port = Number(process.env.PORT) || 4000;
 
 startCleanupLoop();
 
+app.get("/health", (c) => {
+  return c.json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get("/ws", wsRoute);
 
 // app.get("all_peers", (c) => {

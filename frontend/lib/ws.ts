@@ -1,5 +1,5 @@
 import { PeerConnectionManager } from "@/webrtc/PeerConnectionManager";
-import { env } from "@/src/config";
+import { env, wsUrl } from "@/src/config";
 
 type Peer = { id: string; alias: string };
 
@@ -63,7 +63,7 @@ export class WSClient {
     this.alias = alias;
     this.handlers = handlers;
 
-    this.ws = new WebSocket(`ws://${env.apiUrl}/ws?id=${sessionId}`);
+    this.ws = new WebSocket(`${wsUrl}/ws?id=${sessionId}`);
 
     this.ws.onopen = () => {
       this.log("WS connected");
