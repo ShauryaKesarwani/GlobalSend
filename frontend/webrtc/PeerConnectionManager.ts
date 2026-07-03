@@ -97,8 +97,11 @@ export class PeerConnectionManager {
   }
 
   public sendMessage(data: string | ArrayBuffer) {
-    if (this.dc?.readyState === "open") {
-      this.dc.send(data as string | ArrayBufferLike | Blob | ArrayBufferView);
+    if (this.dc?.readyState !== "open") return;
+    if (typeof data === "string") {
+      this.dc.send(data);
+    } else {
+      this.dc.send(data);
     }
   }
 
@@ -209,7 +212,10 @@ export class PeerConnectionManager {
         return;
       }
 
-      if (!this.incomingTransfer || this.incomingTransfer.meta.id !== control.id) {
+      if (
+        !this.incomingTransfer ||
+        this.incomingTransfer.meta.id !== control.id
+      ) {
         this.onLog?.("Ignoring file completion for unknown transfer");
         return;
       }
