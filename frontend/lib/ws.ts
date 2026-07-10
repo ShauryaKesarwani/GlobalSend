@@ -22,7 +22,7 @@ type Handlers = {
   onPeerList: (peers: Peer[]) => void;
   onPeerJoined: (peer: Peer) => void;
   onPeerLeft: (peerId: string) => void;
-  onTransferInvite: (from: string, file: TransferFile) => void;
+  onTransferInvite: (from: string, file?: TransferFile) => void;
   onTransferAccepted: (from: string) => void;
   onTransferDeclined: (from: string) => void;
   onDataChannelOpen: (peerId: string) => void;
@@ -273,7 +273,7 @@ export class WSClient {
 
   // ─── Public API ────────────────────────────────────────────────────────────
 
-  public sendTransferInvite(to: string, file: TransferFile) {
+  public sendTransferInvite(to: string, file?: TransferFile) {
     this.log(`→ transfer-invite to ${to}`);
     this.safeSend({ type: "transfer-invite", to, file });
   }

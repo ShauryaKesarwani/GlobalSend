@@ -6,7 +6,7 @@ import { WSClient } from "@/lib/ws";
 type Peer = { id: string; alias: string };
 type IncomingInvite = {
   from: string;
-  file: { name: string; size: number; mimeType: string };
+  file?: { name: string; size: number; mimeType: string };
 };
 
 type TransferProgress = {
@@ -82,7 +82,11 @@ export default function TransferTestPage() {
       },
       onTransferInvite: (from, file) => {
         setInvite({ from, file });
-        addLog(`Invite received from ${from} for ${file.name}`);
+        addLog(
+          file
+            ? `Invite received from ${from} for ${file.name}`
+            : `Connection invite received from ${from}`,
+        );
       },
       onTransferAccepted: (from) => {
         setConnectedPeers((prev) => (prev.includes(from) ? prev : [...prev, from]));
@@ -159,11 +163,6 @@ export default function TransferTestPage() {
   }, []);
 
   const sendInvite = (peer: Peer) => {
-    if (selectedFiles.length === 0) {
-      setError("Choose one or more files before sending an invite.");
-      return;
-    }
-
     const oversizedFile = selectedFiles.find((file) => file.size > MAX_FILE_SIZE);
     if (oversizedFile) {
       setError(`${oversizedFile.name} is larger than ${formatBytes(MAX_FILE_SIZE)}.`);
@@ -175,21 +174,28 @@ export default function TransferTestPage() {
     setSelectedPeerId(peer.id);
     sentFileNamesRef.current.set(peer.id, selectedFiles.map((file) => file.name).join(", "));
     const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
-    clientRef.current?.sendTransferInvite(peer.id, {
-      name:
-        selectedFiles.length === 1
-          ? selectedFiles[0].name
-          : `${formatFileCount(selectedFiles.length)} selected`,
-      size: totalSize,
-      mimeType:
-        selectedFiles.length === 1
-          ? selectedFiles[0].type || "application/octet-stream"
-          : "application/octet-stream",
-    });
+    clientRef.current?.sendTransferInvite(
+      peer.id,
+      selectedFiles.length > 0
+        ? {
+            name:
+              selectedFiles.length === 1
+                ? selectedFiles[0].name
+                : `${formatFileCount(selectedFiles.length)} selected`,
+            size: totalSize,
+            mimeType:
+              selectedFiles.length === 1
+                ? selectedFiles[0].type || "application/octet-stream"
+                : "application/octet-stream",
+          }
+        : undefined,
+    );
   };
 
   const acceptInvite = () => {
     if (!invite) return;
+    selectedPeerRef.current = invite.from;
+    setSelectedPeerId(invite.from);
     clientRef.current?.sendTransferAccept(invite.from);
     setInvite(null);
   };
@@ -254,7 +260,7 @@ export default function TransferTestPage() {
               <p className="text-sm uppercase tracking-[0.3em] text-stone-500">Transfer Test Lab</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Real-file WebRTC test surface</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-700 sm:text-base">
-                Pick one or more files, invite another peer, then send the actual bytes over the data channel once the WebRTC connection opens. The backend only relays signaling.
+                Connect to a peer first or pick files first. Once the WebRTC connection opens, choose files anytime and send the actual bytes directly. The backend only relays signaling.
               </p>
             </div>
             <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700">
@@ -331,9 +337,10 @@ export default function TransferTestPage() {
                         <div className="mt-4 flex flex-wrap gap-2">
                           <button
                             onClick={() => sendInvite(peer)}
-                            className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition hover:bg-stone-700"
+                            disabled={isConnected}
+                            className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition enabled:hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            Send invite
+                            {isConnected ? "Connected" : "Connect"}
                           </button>
                           <button
                             onClick={() => {
@@ -365,7 +372,7 @@ export default function TransferTestPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-stone-900">Send the actual files</h2>
-                    <p className="mt-1 text-sm text-stone-600">After the invite is accepted and the channel is connected, send the chosen files directly.</p>
+                    <p className="mt-1 text-sm text-stone-600">Connect to a peer first, then choose files anytime and send them directly.</p>
                   </div>
                   <div className="text-sm text-stone-600">
                     Target: <strong>{selectedPeerId || "none"}</strong>
@@ -384,7 +391,7 @@ export default function TransferTestPage() {
                 <div className="mt-4 space-y-3">
                   {transferProgress.length === 0 && (
                     <p className="rounded-2xl border border-dashed border-stone-300 px-4 py-6 text-sm text-stone-600">
-                      No transfers yet. Invite a peer and then send files after the channel connects.
+                      No transfers yet. Connect to a peer and then send files after the channel opens.
                     </p>
                   )}
                   {transferProgress.map((item) => {
@@ -446,8 +453,16 @@ export default function TransferTestPage() {
               <p className="mt-3 text-sm leading-6 text-stone-300">No pending invite right now.</p>
             ) : (
               <div className="mt-4 rounded-3xl border border-amber-300/30 bg-amber-100/10 p-4 text-sm text-stone-100">
-                <div className="font-medium">{invite.from} wants to send {invite.file.name}.</div>
-                <div className="mt-2 text-stone-300">{invite.file.name} · {formatBytes(invite.file.size)}</div>
+                <div className="font-medium">
+                  {invite.file
+                    ? `${invite.from} wants to send ${invite.file.name}.`
+                    : `${invite.from} wants to connect.`}
+                </div>
+                <div className="mt-2 text-stone-300">
+                  {invite.file
+                    ? `${invite.file.name} · ${formatBytes(invite.file.size)}`
+                    : "Accept to open a WebRTC data channel. Files can be selected and sent later."}
+                </div>
                 <div className="mt-4 flex gap-2">
                   <button
                     onClick={acceptInvite}

@@ -32,11 +32,13 @@ export const messageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("transfer-invite"),
     to: z.string(),
-    file: z.object({
-      name: z.string(),
-      size: z.number(),
-      mimeType: z.string(),
-    }),
+    file: z
+      .object({
+        name: z.string(),
+        size: z.number(),
+        mimeType: z.string(),
+      })
+      .optional(),
   }),
 
   z.object({
