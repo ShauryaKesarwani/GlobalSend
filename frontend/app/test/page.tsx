@@ -37,6 +37,10 @@ function formatBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function formatFileCount(count: number) {
+  return `${count} file${count === 1 ? "" : "s"}`;
+}
+
 function sanitizeDownloadName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -50,7 +54,7 @@ export default function TransferTestPage() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
   const [invite, setInvite] = useState<IncomingInvite | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
   const [messages, setMessages] = useState<string[]>([]);
@@ -155,24 +159,32 @@ export default function TransferTestPage() {
   }, []);
 
   const sendInvite = (peer: Peer) => {
-    if (!selectedFile) {
-      setError("Choose a file before sending an invite.");
+    if (selectedFiles.length === 0) {
+      setError("Choose one or more files before sending an invite.");
       return;
     }
 
-    if (selectedFile.size > MAX_FILE_SIZE) {
-      setError(`Choose a file smaller than ${formatBytes(MAX_FILE_SIZE)} for this test.`);
+    const oversizedFile = selectedFiles.find((file) => file.size > MAX_FILE_SIZE);
+    if (oversizedFile) {
+      setError(`${oversizedFile.name} is larger than ${formatBytes(MAX_FILE_SIZE)}.`);
       return;
     }
 
     setError("");
     selectedPeerRef.current = peer.id;
     setSelectedPeerId(peer.id);
-    sentFileNamesRef.current.set(peer.id, selectedFile.name);
+    sentFileNamesRef.current.set(peer.id, selectedFiles.map((file) => file.name).join(", "));
+    const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
     clientRef.current?.sendTransferInvite(peer.id, {
-      name: selectedFile.name,
-      size: selectedFile.size,
-      mimeType: selectedFile.type || "application/octet-stream",
+      name:
+        selectedFiles.length === 1
+          ? selectedFiles[0].name
+          : `${formatFileCount(selectedFiles.length)} selected`,
+      size: totalSize,
+      mimeType:
+        selectedFiles.length === 1
+          ? selectedFiles[0].type || "application/octet-stream"
+          : "application/octet-stream",
     });
   };
 
@@ -188,9 +200,9 @@ export default function TransferTestPage() {
     setInvite(null);
   };
 
-  const sendSelectedFile = async () => {
-    if (!selectedFile || !selectedPeerId) {
-      setError("Pick a peer and wait for the WebRTC connection before sending the file.");
+  const sendSelectedFiles = async () => {
+    if (selectedFiles.length === 0 || !selectedPeerId) {
+      setError("Pick a peer and wait for the WebRTC connection before sending files.");
       return;
     }
 
@@ -199,23 +211,33 @@ export default function TransferTestPage() {
       return;
     }
 
+    const oversizedFile = selectedFiles.find((file) => file.size > MAX_FILE_SIZE);
+    if (oversizedFile) {
+      setError(`${oversizedFile.name} is larger than ${formatBytes(MAX_FILE_SIZE)}.`);
+      return;
+    }
+
     setError("");
-    const progressId = `${selectedPeerId}:${selectedFile.name}`;
-    setTransferProgress((prev) => [
-      ...prev.filter((item) => item.id !== progressId),
-      {
-        id: progressId,
-        peerId: selectedPeerId,
-        fileName: selectedFile.name,
-        transferredBytes: 0,
-        totalBytes: selectedFile.size,
-        direction: "send",
-      },
-    ]);
 
     try {
-      await clientRef.current?.sendFile(selectedPeerId, selectedFile);
-      addLog(`File sent to ${selectedPeerId}: ${selectedFile.name}`);
+      for (const file of selectedFiles) {
+        const progressId = `${selectedPeerId}:${file.name}`;
+        sentFileNamesRef.current.set(selectedPeerId, file.name);
+        setTransferProgress((prev) => [
+          ...prev.filter((item) => item.id !== progressId),
+          {
+            id: progressId,
+            peerId: selectedPeerId,
+            fileName: file.name,
+            transferredBytes: 0,
+            totalBytes: file.size,
+            direction: "send",
+          },
+        ]);
+
+        await clientRef.current?.sendFile(selectedPeerId, file);
+        addLog(`File sent to ${selectedPeerId}: ${file.name}`);
+      }
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : "Unknown send error";
       setError(message);
@@ -232,7 +254,7 @@ export default function TransferTestPage() {
               <p className="text-sm uppercase tracking-[0.3em] text-stone-500">Transfer Test Lab</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Real-file WebRTC test surface</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-700 sm:text-base">
-                Pick a file, invite another peer, then send the actual bytes over the data channel once the WebRTC connection opens. The backend only relays signaling.
+                Pick one or more files, invite another peer, then send the actual bytes over the data channel once the WebRTC connection opens. The backend only relays signaling.
               </p>
             </div>
             <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700">
@@ -244,23 +266,33 @@ export default function TransferTestPage() {
           <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
             <div className="space-y-6">
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
-                <label className="block text-sm font-medium text-stone-700">File for transfer test</label>
+                <label className="block text-sm font-medium text-stone-700">Files for transfer test</label>
                 <input
                   type="file"
+                  multiple
                   className="mt-3 block w-full rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm text-stone-700 file:mr-4 file:rounded-full file:border-0 file:bg-stone-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-50 hover:file:bg-stone-700"
                   onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    setSelectedFile(file);
+                    const files = Array.from(event.target.files ?? []);
+                    setSelectedFiles(files);
                     setError("");
                   }}
                 />
                 <p className="mt-3 text-xs leading-5 text-stone-500">
-                  Safety guardrail: this test route currently limits files to {formatBytes(MAX_FILE_SIZE)} so the receiver keeps everything in memory.
+                  Safety guardrail: this test route currently limits each file to {formatBytes(MAX_FILE_SIZE)} so the receiver keeps one file in memory at a time.
                 </p>
-                {selectedFile && (
+                {selectedFiles.length > 0 && (
                   <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-stone-700 shadow-sm">
-                    <div className="font-medium text-stone-900">{selectedFile.name}</div>
-                    <div>{formatBytes(selectedFile.size)} · {selectedFile.type || "application/octet-stream"}</div>
+                    <div className="font-medium text-stone-900">
+                      {formatFileCount(selectedFiles.length)} selected · {formatBytes(selectedFiles.reduce((sum, file) => sum + file.size, 0))} total
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {selectedFiles.map((file, index) => (
+                        <div key={`${file.name}-${file.size}-${index}`} className="rounded-xl bg-stone-50 px-3 py-2">
+                          <div className="font-medium text-stone-800">{file.name}</div>
+                          <div>{formatBytes(file.size)} · {file.type || "application/octet-stream"}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {error && (
@@ -332,18 +364,18 @@ export default function TransferTestPage() {
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-stone-900">Send the actual file</h2>
-                    <p className="mt-1 text-sm text-stone-600">After the invite is accepted and the channel is connected, send the chosen file directly.</p>
+                    <h2 className="text-lg font-semibold text-stone-900">Send the actual files</h2>
+                    <p className="mt-1 text-sm text-stone-600">After the invite is accepted and the channel is connected, send the chosen files directly.</p>
                   </div>
                   <div className="text-sm text-stone-600">
                     Target: <strong>{selectedPeerId || "none"}</strong>
                   </div>
                 </div>
                 <button
-                  onClick={() => void sendSelectedFile()}
+                  onClick={() => void sendSelectedFiles()}
                   className="mt-4 rounded-full bg-amber-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-amber-500"
                 >
-                  Send selected file now
+                  Send selected files now
                 </button>
               </div>
 
@@ -352,7 +384,7 @@ export default function TransferTestPage() {
                 <div className="mt-4 space-y-3">
                   {transferProgress.length === 0 && (
                     <p className="rounded-2xl border border-dashed border-stone-300 px-4 py-6 text-sm text-stone-600">
-                      No transfers yet. Invite a peer and then send a file after the channel connects.
+                      No transfers yet. Invite a peer and then send files after the channel connects.
                     </p>
                   )}
                   {transferProgress.map((item) => {
@@ -414,7 +446,7 @@ export default function TransferTestPage() {
               <p className="mt-3 text-sm leading-6 text-stone-300">No pending invite right now.</p>
             ) : (
               <div className="mt-4 rounded-3xl border border-amber-300/30 bg-amber-100/10 p-4 text-sm text-stone-100">
-                <div className="font-medium">{invite.from} wants to send a file.</div>
+                <div className="font-medium">{invite.from} wants to send {invite.file.name}.</div>
                 <div className="mt-2 text-stone-300">{invite.file.name} · {formatBytes(invite.file.size)}</div>
                 <div className="mt-4 flex gap-2">
                   <button
