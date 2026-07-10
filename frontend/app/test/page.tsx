@@ -135,6 +135,13 @@ export default function TransferTestPage() {
         addLog(`Saved ${file.name} from ${peerId} into the downloads list`);
       },
       onLog: addLog,
+      onReconnecting: (attempt) => {
+        addLog(`WS disconnected — reconnecting (attempt ${attempt})...`);
+        // Optional: set a state var to show a banner in the UI
+      },
+      onReconnected: () => {
+        addLog("WS reconnected — presence restored");
+      },
     });
 
     clientRef.current = client;
@@ -329,7 +336,7 @@ export default function TransferTestPage() {
                     <p className="mt-1 text-sm text-stone-600">After the invite is accepted and the channel is connected, send the chosen file directly.</p>
                   </div>
                   <div className="text-sm text-stone-600">
-                    Target: <strong>{selectedPeerId || selectedPeerRef.current || "none"}</strong>
+                    Target: <strong>{selectedPeerId || "none"}</strong>
                   </div>
                 </div>
                 <button

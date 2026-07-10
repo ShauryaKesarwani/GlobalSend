@@ -27,7 +27,6 @@ type IncomingTransfer = {
 export class PeerConnectionManager {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
-  private ws: WebSocket;
   private remotePeerId: string;
   private incomingTransfer: IncomingTransfer | null = null;
 
@@ -55,8 +54,7 @@ export class PeerConnectionManager {
   }) => void;
   onLog?: (message: string) => void;
 
-  constructor(ws: WebSocket, remotePeerId: string) {
-    this.ws = ws;
+  constructor(private getWs: () => WebSocket, remotePeerId: string) {
     this.remotePeerId = remotePeerId;
   }
 
@@ -83,7 +81,7 @@ export class PeerConnectionManager {
     await this.pc!.setRemoteDescription(sdp);
     const answer = await this.pc!.createAnswer();
     await this.pc!.setLocalDescription(answer);
-    this.ws.send(
+    this.getWs().send(
       JSON.stringify({
         type: "answer",
         to: this.remotePeerId,
@@ -167,7 +165,7 @@ export class PeerConnectionManager {
 
     this.pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.ws.send(
+        this.getWs().send(
           JSON.stringify({
             type: "candidate",
             to: this.remotePeerId,
@@ -181,7 +179,7 @@ export class PeerConnectionManager {
   private async createAndSendOffer() {
     const offer = await this.pc!.createOffer();
     await this.pc!.setLocalDescription(offer);
-    this.ws.send(
+    this.getWs().send(
       JSON.stringify({
         type: "offer",
         to: this.remotePeerId,

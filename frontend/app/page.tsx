@@ -3,7 +3,7 @@ import Link from "next/link";
 export default function Home() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f8f1df,transparent_45%),linear-gradient(180deg,#f6f3ea_0%,#ebe4d4_100%)] px-6 py-16 text-stone-900">
-      <div className="mx-auto flex max-w-4xl flex-col gap-8 rounded-[2rem] border border-stone-300/70 bg-white/70 p-8 shadow-[0_24px_80px_rgba(71,51,24,0.12)] backdrop-blur">
+      <div className="mx-auto flex max-w-4xl flex-col gap-8 rounded-4xl border border-stone-300/70 bg-white/70 p-8 shadow-[0_24px_80px_rgba(71,51,24,0.12)] backdrop-blur">
         <div className="space-y-4">
           <p className="text-sm uppercase tracking-[0.3em] text-stone-500">Rift</p>
           <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
