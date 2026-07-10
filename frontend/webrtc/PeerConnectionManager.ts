@@ -158,10 +158,24 @@ export class PeerConnectionManager {
     this.incomingTransfer = null;
   }
 
+  public isOpen() {
+    return this.dc?.readyState === "open";
+  }
+
   private createPeerConnection() {
     this.pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
+
+    this.pc.onconnectionstatechange = () => {
+      const state = this.pc?.connectionState;
+      if (!state) return;
+
+      this.onLog?.(`Peer connection state: ${state}`);
+      if (state === "failed" || state === "closed") {
+        this.onClose?.();
+      }
+    };
 
     this.pc.onicecandidate = (event) => {
       if (event.candidate) {

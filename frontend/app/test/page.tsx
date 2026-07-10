@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { PeerQrCode } from "@/components/PeerQrCode";
+import {
+  getConnectPeerAlias,
+  getConnectPeerId,
+} from "@/lib/peerDeepLink";
 import { WSClient } from "@/lib/ws";
 
 type Peer = { id: string; alias: string };
@@ -27,9 +32,21 @@ type ReceivedFile = {
   objectUrl: string;
 };
 
+type AutoConnectStatus =
+  | "idle"
+  | "waiting-for-peer"
+  | "inviting"
+  | "connected"
+  | "self"
+  | "declined";
+
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const SESSION_ID = `peer-${Math.random().toString(36).slice(2, 7)}`;
 const ALIAS = `user-${Math.random().toString(36).slice(2, 5)}`;
+
+const subscribeToLocationSearch = () => () => undefined;
+const getBrowserLocationSearch = () => window.location.search;
+const getServerLocationSearch = () => "";
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -45,11 +62,45 @@ function sanitizeDownloadName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function describeAutoConnectStatus(
+  status: AutoConnectStatus,
+  peerId: string,
+  alias: string | null,
+) {
+  const label = alias ? `${alias} (${peerId})` : peerId;
+
+  switch (status) {
+    case "waiting-for-peer":
+      return `Waiting for ${label} to appear on the WebSocket peer list...`;
+    case "inviting":
+      return `Invite sent to ${label}. Waiting for them to accept.`;
+    case "connected":
+      return `Connected to ${label}.`;
+    case "self":
+      return "This QR link points to your own current session, so it was ignored.";
+    case "declined":
+      return `${label} declined the connection invite.`;
+    case "idle":
+    default:
+      return "";
+  }
+}
+
 export default function TransferTestPage() {
   const clientRef = useRef<WSClient | null>(null);
   const selectedPeerRef = useRef<string | null>(null);
   const sentFileNamesRef = useRef<Map<string, string>>(new Map());
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
+  const autoInviteSentToRef = useRef<string | null>(null);
+  const connectPeerIdRef = useRef<string | null>(null);
+
+  const locationSearch = useSyncExternalStore(
+    subscribeToLocationSearch,
+    getBrowserLocationSearch,
+    getServerLocationSearch,
+  );
+  const connectPeerId = getConnectPeerId(new URLSearchParams(locationSearch));
+  const connectPeerAlias = getConnectPeerAlias(new URLSearchParams(locationSearch));
 
   const [peers, setPeers] = useState<Peer[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
@@ -61,12 +112,18 @@ export default function TransferTestPage() {
   const [error, setError] = useState<string>("");
   const [transferProgress, setTransferProgress] = useState<TransferProgress[]>([]);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [autoConnectStatus, setAutoConnectStatus] =
+    useState<AutoConnectStatus>("idle");
 
   const addLog = (msg: string) => setLogs((prev) => [...prev.slice(-79), msg]);
 
   useEffect(() => {
     receivedFilesRef.current = receivedFiles;
   }, [receivedFiles]);
+
+  useEffect(() => {
+    connectPeerIdRef.current = connectPeerId;
+  }, [connectPeerId]);
 
   useEffect(() => {
     const client = new WSClient(SESSION_ID, ALIAS, {
@@ -91,9 +148,16 @@ export default function TransferTestPage() {
       onTransferAccepted: (from) => {
         setConnectedPeers((prev) => (prev.includes(from) ? prev : [...prev, from]));
       },
-      onTransferDeclined: (from) => addLog(`${from} declined the transfer`),
+      onTransferDeclined: (from) => {
+        addLog(`${from} declined the transfer`);
+        if (from === connectPeerIdRef.current) setAutoConnectStatus("declined");
+      },
       onDataChannelOpen: (peerId) => {
         setConnectedPeers((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
+        if (peerId === connectPeerIdRef.current) setAutoConnectStatus("connected");
+      },
+      onDataChannelClose: (peerId) => {
+        setConnectedPeers((prev) => prev.filter((id) => id !== peerId));
       },
       onDataChannelMessage: (peerId, data) => {
         const preview = typeof data === "string" ? data : `[binary ${data.byteLength} bytes]`;
@@ -192,6 +256,41 @@ export default function TransferTestPage() {
     );
   };
 
+  useEffect(() => {
+    if (!connectPeerId) return;
+
+    const deferUiUpdate = (update: () => void) => {
+      window.setTimeout(update, 0);
+    };
+
+    if (connectPeerId === SESSION_ID) {
+      deferUiUpdate(() => setAutoConnectStatus("self"));
+      return;
+    }
+
+    if (connectedPeers.includes(connectPeerId)) {
+      deferUiUpdate(() => setAutoConnectStatus("connected"));
+      return;
+    }
+
+    if (autoInviteSentToRef.current === connectPeerId) return;
+
+    const targetPeer = peers.find((peer) => peer.id === connectPeerId);
+    if (!targetPeer) {
+      deferUiUpdate(() => setAutoConnectStatus("waiting-for-peer"));
+      return;
+    }
+
+    autoInviteSentToRef.current = connectPeerId;
+    clientRef.current?.sendTransferInvite(targetPeer.id);
+    deferUiUpdate(() => {
+      selectedPeerRef.current = targetPeer.id;
+      setSelectedPeerId(targetPeer.id);
+      setAutoConnectStatus("inviting");
+      addLog(`QR link found ${targetPeer.id}; sending connection invite`);
+    });
+  }, [connectPeerId, connectedPeers, peers]);
+
   const acceptInvite = () => {
     if (!invite) return;
     selectedPeerRef.current = invite.from;
@@ -251,10 +350,18 @@ export default function TransferTestPage() {
     }
   };
 
+  const autoConnectMessage = connectPeerId
+    ? describeAutoConnectStatus(
+        autoConnectStatus,
+        connectPeerId,
+        connectPeerAlias,
+      )
+    : "";
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f0e3c2,transparent_40%),linear-gradient(180deg,#f6f3eb_0%,#ddd2bb_100%)] px-4 py-8 text-stone-900 sm:px-6">
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <section className="rounded-[2rem] border border-stone-300/80 bg-white/80 p-6 shadow-[0_20px_70px_rgba(58,41,19,0.14)] backdrop-blur">
+        <section className="rounded-4xl border border-stone-300/80 bg-white/80 p-6 shadow-[0_20px_70px_rgba(58,41,19,0.14)] backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-stone-200 pb-5">
             <div>
               <p className="text-sm uppercase tracking-[0.3em] text-stone-500">Transfer Test Lab</p>
@@ -263,11 +370,20 @@ export default function TransferTestPage() {
                 Connect to a peer first or pick files first. Once the WebRTC connection opens, choose files anytime and send the actual bytes directly. The backend only relays signaling.
               </p>
             </div>
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700">
-              <div><strong>Session</strong> {SESSION_ID}</div>
-              <div><strong>Alias</strong> {ALIAS}</div>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700">
+                <div><strong>Session</strong> {SESSION_ID}</div>
+                <div><strong>Alias</strong> {ALIAS}</div>
+              </div>
+              <PeerQrCode peerId={SESSION_ID} alias={ALIAS} />
             </div>
           </div>
+
+          {autoConnectMessage && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <strong>QR connection:</strong> {autoConnectMessage}
+            </div>
+          )}
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
             <div className="space-y-6">
@@ -446,7 +562,7 @@ export default function TransferTestPage() {
           </div>
         </section>
 
-        <aside className="space-y-6 rounded-[2rem] border border-stone-300/80 bg-stone-950 p-6 text-stone-100 shadow-[0_20px_70px_rgba(33,24,13,0.35)]">
+        <aside className="space-y-6 rounded-4xl border border-stone-300/80 bg-stone-950 p-6 text-stone-100 shadow-[0_20px_70px_rgba(33,24,13,0.35)]">
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-stone-400">Incoming request</p>
             {!invite ? (
@@ -494,7 +610,7 @@ export default function TransferTestPage() {
 
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-stone-400">Event log</p>
-            <div className="mt-4 max-h-[28rem] space-y-2 overflow-y-auto rounded-3xl bg-stone-900 p-4 font-mono text-xs text-emerald-300">
+            <div className="mt-4 max-h-112 space-y-2 overflow-y-auto rounded-3xl bg-stone-900 p-4 font-mono text-xs text-emerald-300">
               {logs.map((line, index) => (
                 <div key={`${line}-${index}`}>{line}</div>
               ))}
@@ -505,5 +621,10 @@ export default function TransferTestPage() {
     </main>
   );
 }
+
+
+
+
+
 
 

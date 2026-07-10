@@ -26,6 +26,7 @@ type Handlers = {
   onTransferAccepted: (from: string) => void;
   onTransferDeclined: (from: string) => void;
   onDataChannelOpen: (peerId: string) => void;
+  onDataChannelClose: (peerId: string) => void;
   onDataChannelMessage: (peerId: string, data: string | ArrayBuffer) => void;
   onFileStart: (
     peerId: string,
@@ -64,6 +65,10 @@ export class WSClient {
   private peers = new Map<string, PeerConnectionManager>();
   private handlers: Handlers;
   private heartbeatTimer: number | null = null;
+  private autoReconnectPeerIds = new Set<string>();
+  private previouslyConnectedPeerIds = new Set<string>();
+  private reconnectFallbackTimers = new Map<string, number>();
+  private shouldRestorePeers = false;
 
   // Reconnect state
   private reconnectAttempt = 0;
@@ -100,6 +105,7 @@ export class WSClient {
 
       if (!this.isFirstConnect) {
         this.handlers.onReconnected?.();
+        this.shouldRestorePeers = this.autoReconnectPeerIds.size > 0;
       }
       this.isFirstConnect = false;
     };
@@ -113,6 +119,8 @@ export class WSClient {
       if (this.isDisposed || ws !== this.ws) return;
 
       this.log("WS disconnected");
+      this.rememberOpenPeersForReconnect();
+      this.closePeerConnections();
       this.stopHeartbeat();
       this.scheduleReconnect();
     };
@@ -158,6 +166,7 @@ export class WSClient {
     switch (msg.type) {
       case "peer_list":
         this.handlers.onPeerList(msg.peers);
+        this.restorePeerConnections(msg.peers);
         break;
       case "peer_joined":
         this.handlers.onPeerJoined(msg.peer);
@@ -168,6 +177,12 @@ export class WSClient {
         this.peers.delete(msg.id);
         break;
       case "transfer-invite":
+        if (!msg.file && this.previouslyConnectedPeerIds.has(msg.from)) {
+          this.clearReconnectFallback(msg.from);
+          this.log(`Auto-accepting reconnect invite from ${msg.from}`);
+          this.sendTransferAccept(msg.from);
+          break;
+        }
         this.handlers.onTransferInvite(msg.from, msg.file);
         break;
       case "transfer-accept":
@@ -223,6 +238,9 @@ export class WSClient {
 
     pc.onOpen = () => {
       this.log(`DataChannel OPEN with ${remotePeerId}`);
+      this.previouslyConnectedPeerIds.add(remotePeerId);
+      this.autoReconnectPeerIds.delete(remotePeerId);
+      this.clearReconnectFallback(remotePeerId);
       this.handlers.onDataChannelOpen(remotePeerId);
     };
 
@@ -263,6 +281,7 @@ export class WSClient {
     pc.onClose = () => {
       this.log(`DataChannel closed with ${remotePeerId}`);
       this.peers.delete(remotePeerId);
+      this.handlers.onDataChannelClose(remotePeerId);
     };
 
     pc.onLog = (message) => this.log(`${remotePeerId}: ${message}`);
@@ -316,6 +335,7 @@ export class WSClient {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearReconnectFallbacks();
     for (const [, peer] of this.peers) {
       peer.close();
     }
@@ -338,6 +358,78 @@ export class WSClient {
     } else {
       this.log(`safeSend dropped (WS not open): ${JSON.stringify(payload)}`);
     }
+  }
+
+  private rememberOpenPeersForReconnect() {
+    this.autoReconnectPeerIds.clear();
+
+    for (const [peerId, peer] of this.peers) {
+      if (peer.isOpen()) {
+        this.autoReconnectPeerIds.add(peerId);
+      }
+    }
+
+    if (this.autoReconnectPeerIds.size > 0) {
+      this.log(
+        `Will try to restore peer connection(s): ${[...this.autoReconnectPeerIds].join(", ")}`,
+      );
+    }
+  }
+
+  private closePeerConnections() {
+    this.clearReconnectFallbacks();
+
+    for (const [peerId, peer] of this.peers) {
+      peer.close();
+      this.handlers.onDataChannelClose(peerId);
+    }
+    this.peers.clear();
+  }
+
+  private restorePeerConnections(peers: Peer[]) {
+    if (!this.shouldRestorePeers) return;
+    this.shouldRestorePeers = false;
+
+    for (const peerId of this.autoReconnectPeerIds) {
+      if (!peers.some((peer) => peer.id === peerId)) {
+        this.log(`Peer reconnect skipped: ${peerId} is not visible after WS reconnect`);
+        this.autoReconnectPeerIds.delete(peerId);
+        this.handlers.onDataChannelClose(peerId);
+        continue;
+      }
+
+      if (this.sessionId < peerId) {
+        this.log(`Trying to restore WebRTC connection with ${peerId}`);
+        this.sendTransferInvite(peerId);
+      } else {
+        this.log(
+          `Waiting for ${peerId} to restore WebRTC connection; will retry shortly if no invite arrives`,
+        );
+        const timer = window.setTimeout(() => {
+          this.reconnectFallbackTimers.delete(peerId);
+          if (!this.autoReconnectPeerIds.has(peerId) || this.peers.has(peerId)) return;
+
+          this.log(`Fallback restore attempt with ${peerId}`);
+          this.sendTransferInvite(peerId);
+        }, 2000);
+        this.reconnectFallbackTimers.set(peerId, timer);
+      }
+    }
+  }
+
+  private clearReconnectFallback(peerId: string) {
+    const timer = this.reconnectFallbackTimers.get(peerId);
+    if (timer === undefined) return;
+
+    window.clearTimeout(timer);
+    this.reconnectFallbackTimers.delete(peerId);
+  }
+
+  private clearReconnectFallbacks() {
+    for (const timer of this.reconnectFallbackTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.reconnectFallbackTimers.clear();
   }
 
   private startHeartbeat() {
