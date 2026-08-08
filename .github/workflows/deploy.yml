@@ -1,0 +1,48 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+
+          script: |
+            cd /home/ubuntu/projects/GlobalSend/backend
+
+            echo "Pulling latest code..."
+            git pull origin main
+
+            echo "Installing dependencies..."
+            bun install --frozen-lockfile
+
+            echo "Restarting backend..."
+            sudo systemctl restart mybackend
+
+            echo "Checking backend..."
+            sleep 2
+            curl -f http://localhost:4000 || exit 1
+
+            echo "Checking Tailscale Funnel..."
+            if ! sudo tailscale funnel status | grep -q "4000"; then
+              echo "Funnel is not configured. Starting it..."
+              sudo tailscale funnel --bg 4000
+            else
+              echo "Funnel is already configured."
+            fi
+
+            echo "Deployment complete!"
