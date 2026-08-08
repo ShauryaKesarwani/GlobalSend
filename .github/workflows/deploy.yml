@@ -24,6 +24,10 @@ jobs:
           script: |
             cd /home/ubuntu/projects/GlobalSend/backend
 
+            export PATH="$HOME/.bun/bin:$PATH"
+            echo "Checking Bun..."
+            bun --version
+
             echo "Pulling latest code..."
             git pull origin main
 
@@ -31,7 +35,7 @@ jobs:
             bun install --frozen-lockfile
 
             echo "Restarting backend..."
-            sudo systemctl restart mybackend
+            sudo systemctl restart globalsendbackend
 
             echo "Checking backend..."
             sleep 2
@@ -43,6 +47,12 @@ jobs:
               sudo tailscale funnel --bg 4000
             else
               echo "Funnel is already configured."
+            fi
+
+            echo "systemctl health check..."
+            if ! sudo systemctl is-active --quiet globalsendbackend.service; then
+                sudo systemctl status globalsendbackend.service --no-pager
+                exit 1
             fi
 
             echo "Deployment complete!"
