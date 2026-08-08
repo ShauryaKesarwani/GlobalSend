@@ -22,37 +22,80 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
 
           script: |
-            cd /home/ubuntu/projects/GlobalSend/backend
+            set -e
 
             export PATH="$HOME/.bun/bin:$PATH"
-            echo "Checking Bun..."
+
+            echo ""
+            echo "========================================"
+            echo "        🚀 GlobalSend Deployment"
+            echo "========================================"
+            echo ""
+
+            echo "▶ [1/6] Checking Bun..."
             bun --version
+            echo "✓ Bun is available"
+            echo ""
 
-            echo "Pulling latest code..."
+            echo "▶ [2/6] Pulling latest code..."
             git pull origin main
+            echo "✓ Code updated"
+            echo ""
 
-            echo "Installing dependencies..."
+            echo "▶ [3/6] Installing dependencies..."
             bun install --frozen-lockfile
+            echo "✓ Dependencies installed"
+            echo ""
 
-            echo "Restarting backend..."
-            sudo systemctl restart globalsendbackend
-
-            echo "Checking backend..."
+            echo "▶ [4/6] Restarting backend..."
+            sudo systemctl restart globalsendbackend.service
             sleep 2
-            curl -f http://localhost:4000 || exit 1
 
-            echo "Checking Tailscale Funnel..."
-            if ! sudo tailscale funnel status | grep -q "4000"; then
-              echo "Funnel is not configured. Starting it..."
-              sudo tailscale funnel --bg 4000
-            else
-              echo "Funnel is already configured."
-            fi
-
-            echo "systemctl health check..."
             if ! sudo systemctl is-active --quiet globalsendbackend.service; then
-                sudo systemctl status globalsendbackend.service --no-pager
-                exit 1
+              echo ""
+              echo "✗ Backend service failed to start!"
+              echo ""
+              echo "----- Service Status -----"
+              sudo systemctl status globalsendbackend.service --no-pager || true
+              echo ""
+              echo "----- Recent Logs -----"
+              sudo journalctl -u globalsendbackend.service -n 50 --no-pager || true
+              exit 1
             fi
 
-            echo "Deployment complete!"
+            echo "✓ Backend service is running"
+            echo ""
+
+            echo "▶ [5/6] Checking backend health..."
+
+            if ! curl -fsS http://localhost:4000/health; then
+              echo ""
+              echo "✗ Backend health check failed!"
+              echo ""
+              echo "----- Service Status -----"
+              sudo systemctl status globalsendbackend.service --no-pager || true
+              echo ""
+              echo "----- Recent Logs -----"
+              sudo journalctl -u globalsendbackend.service -n 50 --no-pager || true
+              exit 1
+            fi
+
+            echo ""
+            echo "✓ Backend health check passed"
+            echo ""
+
+            echo "▶ [6/6] Checking Tailscale Funnel..."
+
+            if sudo tailscale funnel status | grep -q "4000"; then
+              echo "✓ Tailscale Funnel is configured"
+            else
+              echo "⚠ Funnel is not configured"
+              echo "▶ Starting Tailscale Funnel on port 4000..."
+
+              sudo tailscale funnel --bg 4000
+
+              echo "✓ Tailscale Funnel started"
+            fi
+
+            echo "========================================"
+            echo "        ✓ Deployment Successful"
