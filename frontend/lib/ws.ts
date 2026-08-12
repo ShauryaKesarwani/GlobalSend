@@ -266,7 +266,7 @@ export class WSClient {
     };
 
     pc.onFileComplete = (file) => {
-      const objectUrl = URL.createObjectURL(file.blob);
+      const objectUrl = file.blob ? URL.createObjectURL(file.blob) : "";
       this.log(`File received from ${remotePeerId}: ${file.name}`);
       this.handlers.onFileComplete(remotePeerId, {
         id: file.id,

@@ -41,7 +41,7 @@ The key idea: **your file bytes never travel through our servers.** The backend 
 - 🖥️ **Zero install** — it's a web app. Open it on a phone, a work laptop, a locked‑down machine.
 - 🔒 **Bytes stay private** — files go browser‑to‑browser over WebRTC's built‑in DTLS encryption. The server literally never sees them.
 - 📷 **QR + deep‑link pairing** — scan a code from another device to auto‑connect.
-- ⚡ **Fast** — 256 KB chunks with backpressure control keep transfers smooth without blowing up memory.
+- ⚡ **Fast** — bounded read-ahead and backpressure keep the DataChannel fed without unbounded sender memory.
 
 ---
 
@@ -124,7 +124,7 @@ Planned and in‑progress work:
 - ♻️ **Resumable transfers** with chunk‑range reconciliation after a drop
 - 📁 **Folder transfers** and richer multi‑file queueing
 - 🔀 **TURN relay fallback** for the strictest NATs and firewalls (config path already stubbed)
-- 💾 **Streaming to disk** via the File System Access API (today large files buffer in memory)
+- 💾 **Streaming to disk** via the File System Access API (Blob fallback remains for unsupported browsers)
 - 🧾 **Integrity verification** — end‑to‑end checksum before the save prompt
 - 🛡️ **Abuse controls** — invite rate limiting and payload size caps
 - 🚪 **Rooms / contacts** and optional transfer history

@@ -1,5 +1,8 @@
 const CONTROL_PREFIX = "__rift_ctrl__";
 const CHUNK_SIZE = 256 * 1024; //256kb
+const MAX_READ_AHEAD = 4;
+const HIGH_WATER_MARK = 8 * 1024 * 1024;
+const LOW_WATER_MARK = 4 * 1024 * 1024;
 
 type FileManifest = {
   kind: "file-meta";
@@ -22,6 +25,9 @@ type IncomingTransfer = {
   meta: FileManifest;
   buffers: ArrayBuffer[];
   receivedBytes: number;
+  sink: FileSystemWritableFileStream | null;
+  sinkReady: Promise<FileSystemWritableFileStream | null>;
+  writeChain: Promise<void>;
 };
 
 export class PeerConnectionManager {
@@ -50,7 +56,8 @@ export class PeerConnectionManager {
     name: string;
     mimeType: string;
     size: number;
-    blob: Blob;
+    blob?: Blob;
+    savedToDisk: boolean;
   }) => void;
   onLog?: (message: string) => void;
 
@@ -122,7 +129,8 @@ export class PeerConnectionManager {
     }
 
     const transferId = crypto.randomUUID();
-    const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+    const chunkSize = this.getChunkSize();
+    const chunkCount = Math.max(1, Math.ceil(file.size / chunkSize));
 
     this.sendControlMessage({
       kind: "file-meta",
@@ -130,18 +138,36 @@ export class PeerConnectionManager {
       name: file.name,
       mimeType: file.type || "application/octet-stream",
       size: file.size,
-      chunkSize: CHUNK_SIZE,
+       chunkSize,
       chunkCount,
     });
 
-    let offset = 0;
-    while (offset < file.size) {
+    const chunks: Array<{ offset: number; buffer: Promise<ArrayBuffer> }> = [];
+    let nextOffset = 0;
+    let sentOffset = 0;
+
+    const queueChunk = () => {
+      if (nextOffset >= file.size) return;
+      const offset = nextOffset;
+      nextOffset += Math.min(chunkSize, file.size - offset);
+      chunks.push({
+        offset,
+        buffer: file.slice(offset, nextOffset).arrayBuffer(),
+      });
+    };
+
+    while (chunks.length < MAX_READ_AHEAD && nextOffset < file.size) {
+      queueChunk();
+    }
+
+    while (chunks.length > 0) {
       await this.waitForBufferedAmountLow();
-      const nextChunk = file.slice(offset, offset + CHUNK_SIZE);
-      const chunkBuffer = await nextChunk.arrayBuffer();
+      const chunk = chunks.shift()!;
+      const chunkBuffer = await chunk.buffer;
       this.dc.send(chunkBuffer);
-      offset += chunkBuffer.byteLength;
-      handlers?.onProgress?.(offset, file.size);
+      sentOffset += chunkBuffer.byteLength;
+      handlers?.onProgress?.(sentOffset, file.size);
+      queueChunk();
     }
 
     this.sendControlMessage({
@@ -190,6 +216,12 @@ export class PeerConnectionManager {
     };
   }
 
+  private getChunkSize() {
+    const maxMessageSize = this.pc?.sctp?.maxMessageSize;
+    if (!maxMessageSize || !Number.isFinite(maxMessageSize)) return CHUNK_SIZE;
+    return Math.max(16 * 1024, Math.min(CHUNK_SIZE, maxMessageSize));
+  }
+
   private async createAndSendOffer() {
     const offer = await this.pc!.createOffer();
     await this.pc!.setLocalDescription(offer);
@@ -221,6 +253,9 @@ export class PeerConnectionManager {
           meta: control,
           buffers: [],
           receivedBytes: 0,
+          sink: null,
+          sinkReady: this.openFileSink(control),
+          writeChain: Promise.resolve(),
         };
         this.onFileStart?.({
           id: control.id,
@@ -240,34 +275,52 @@ export class PeerConnectionManager {
         return;
       }
 
-      const { meta, buffers, receivedBytes } = this.incomingTransfer;
+      const transfer = this.incomingTransfer;
+      const { meta, buffers, receivedBytes } = transfer;
       if (receivedBytes !== meta.size) {
         this.onLog?.(
           `Transfer ${meta.name} ended with ${receivedBytes}/${meta.size} bytes`,
         );
       }
 
-      const blob = new Blob(buffers, {
-        type: meta.mimeType || "application/octet-stream",
-      });
-      this.onFileComplete?.({
-        id: meta.id,
-        name: meta.name,
-        mimeType: meta.mimeType,
-        size: receivedBytes,
-        blob,
-      });
+      void (async () => {
+        await transfer.writeChain;
+        const sink = await transfer.sinkReady;
+        if (sink) await sink.close();
+        const blob = sink
+          ? undefined
+          : new Blob(buffers, {
+              type: meta.mimeType || "application/octet-stream",
+            });
+        this.onFileComplete?.({
+          id: meta.id,
+          name: meta.name,
+          mimeType: meta.mimeType,
+          size: receivedBytes,
+          blob,
+          savedToDisk: Boolean(sink),
+        });
+      })();
       this.incomingTransfer = null;
       return;
     }
 
     if (data instanceof ArrayBuffer && this.incomingTransfer) {
-      this.incomingTransfer.buffers.push(data);
-      this.incomingTransfer.receivedBytes += data.byteLength;
+      const transfer = this.incomingTransfer;
+      transfer.receivedBytes += data.byteLength;
+      transfer.writeChain = transfer.writeChain.then(async () => {
+        const sink = await transfer.sinkReady;
+        if (sink) {
+          await sink.write(new Uint8Array(data));
+          transfer.sink = sink;
+        } else {
+          transfer.buffers.push(data);
+        }
+      });
       this.onFileProgress?.({
-        id: this.incomingTransfer.meta.id,
-        receivedBytes: this.incomingTransfer.receivedBytes,
-        totalBytes: this.incomingTransfer.meta.size,
+        id: transfer.meta.id,
+        receivedBytes: transfer.receivedBytes,
+        totalBytes: transfer.meta.size,
       });
       return;
     }
@@ -282,10 +335,7 @@ export class PeerConnectionManager {
   private async waitForBufferedAmountLow() {
     if (!this.dc) return;
 
-    const highWaterMark = 32 * CHUNK_SIZE;
-    const lowWaterMark = 16 * CHUNK_SIZE;
-
-    if (this.dc.bufferedAmount <= highWaterMark) return;
+    if (this.dc.bufferedAmount <= HIGH_WATER_MARK) return;
 
     await new Promise<void>((resolve) => {
       if (!this.dc) {
@@ -293,7 +343,7 @@ export class PeerConnectionManager {
         return;
       }
 
-      this.dc.bufferedAmountLowThreshold = lowWaterMark;
+      this.dc.bufferedAmountLowThreshold = LOW_WATER_MARK;
       const handleLow = () => {
         if (!this.dc) {
           resolve();
@@ -306,5 +356,28 @@ export class PeerConnectionManager {
 
       this.dc.addEventListener("bufferedamountlow", handleLow);
     });
+  }
+
+  private async openFileSink(meta: FileManifest) {
+    if (!("showSaveFilePicker" in window)) return null;
+
+    try {
+      const picker = (window as Window & {
+        showSaveFilePicker?: (options?: object) => Promise<{
+          createWritable: () => Promise<FileSystemWritableFileStream>;
+        }>;
+      }).showSaveFilePicker;
+      if (!picker) return null;
+      const handle = await picker({
+        suggestedName: meta.name,
+        types: [{
+          description: meta.mimeType || "File",
+          accept: { [meta.mimeType || "application/octet-stream"]: [".bin"] },
+        }],
+      });
+      return await handle.createWritable();
+    } catch {
+      return null;
+    }
   }
 }

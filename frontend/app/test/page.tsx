@@ -40,7 +40,6 @@ type AutoConnectStatus =
   | "self"
   | "declined";
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const SESSION_ID = `peer-${Math.random().toString(36).slice(2, 7)}`;
 const ALIAS = `user-${Math.random().toString(36).slice(2, 5)}`;
 
@@ -196,7 +195,7 @@ export default function TransferTestPage() {
         });
       },
       onFileComplete: (peerId, file) => {
-        setReceivedFiles((prev) => [file, ...prev]);
+        if (file.objectUrl) setReceivedFiles((prev) => [file, ...prev]);
         setTransferProgress((prev) =>
           prev.map((item) =>
             item.id === file.id
@@ -204,7 +203,11 @@ export default function TransferTestPage() {
               : item,
           ),
         );
-        addLog(`Saved ${file.name} from ${peerId} into the downloads list`);
+        addLog(
+          file.objectUrl
+            ? `Saved ${file.name} from ${peerId} into the downloads list`
+            : `Saved ${file.name} from ${peerId} to disk`,
+        );
       },
       onLog: addLog,
       onReconnecting: (attempt) => {
@@ -227,12 +230,6 @@ export default function TransferTestPage() {
   }, []);
 
   const sendInvite = (peer: Peer) => {
-    const oversizedFile = selectedFiles.find((file) => file.size > MAX_FILE_SIZE);
-    if (oversizedFile) {
-      setError(`${oversizedFile.name} is larger than ${formatBytes(MAX_FILE_SIZE)}.`);
-      return;
-    }
-
     setError("");
     selectedPeerRef.current = peer.id;
     setSelectedPeerId(peer.id);
@@ -316,12 +313,6 @@ export default function TransferTestPage() {
       return;
     }
 
-    const oversizedFile = selectedFiles.find((file) => file.size > MAX_FILE_SIZE);
-    if (oversizedFile) {
-      setError(`${oversizedFile.name} is larger than ${formatBytes(MAX_FILE_SIZE)}.`);
-      return;
-    }
-
     setError("");
 
     try {
@@ -400,7 +391,7 @@ export default function TransferTestPage() {
                   }}
                 />
                 <p className="mt-3 text-xs leading-5 text-stone-500">
-                  Safety guardrail: this test route currently limits each file to {formatBytes(MAX_FILE_SIZE)} so the receiver keeps one file in memory at a time.
+                  Files are streamed directly to disk when supported. Other browsers use an in-memory download fallback.
                 </p>
                 {selectedFiles.length > 0 && (
                   <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-stone-700 shadow-sm">
