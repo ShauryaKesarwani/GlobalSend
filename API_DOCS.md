@@ -349,17 +349,18 @@ A ──►  <ArrayBuffer chunk 2>        │ B fires onFileProgress each chunk
 A ──►  ...                          │
 A ──►  <ArrayBuffer chunk N>        │
 A ──►  __rift_ctrl__{"kind":"file-complete", id}
-                                    │ B assembles Blob(buffers), fires onFileComplete
+                                     │ B closes disk sink or assembles Blob fallback
 ```
 
-**Receiver assembly:** chunks are pushed into an in-memory `ArrayBuffer[]`; on `file-complete` they're joined into a `Blob` and handed up as an object URL for download. *(Large files buffer in RAM today — streaming-to-disk is on the roadmap.)*
+**Receiver assembly:** the receiver opens a File System Access writable when supported and queues chunks into it in arrival order. Browsers without that API retain the existing in-memory `ArrayBuffer[]` and `Blob` fallback. A denied or unavailable save picker also falls back automatically.
 
 ### Backpressure
 
 The sender gates on `dc.bufferedAmount` to avoid unbounded memory ([`PeerConnectionManager.ts:282`](frontend/webrtc/PeerConnectionManager.ts#L282)):
 
-- **High watermark** = `32 × CHUNK_SIZE` (8 MB) → pause sending.
-- **Low watermark** = `16 × CHUNK_SIZE` (4 MB) → resume on `bufferedamountlow`.
+- **High watermark** = 8 MB → pause sending.
+- **Low watermark** = 4 MB → resume on `bufferedamountlow`.
+- The sender keeps up to 4 file reads in flight and caps each message at the negotiated SCTP `maxMessageSize`, up to 256 KB.
 
 ---
 
@@ -523,10 +524,11 @@ One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
 | Reconnect backoff | `1s → 30s` cap | `ws.ts` | `BACKOFF_BASE_MS`=1000, `BACKOFF_MAX_MS`=30000 |
 | Reconnect fallback | **2 s** | `ws.ts` | higher-id peer waits before re-inviting |
 | Chunk size | **256 KB** | `PeerConnectionManager.ts` | `CHUNK_SIZE = 256*1024` |
-| Backpressure high | **8 MB** (`32×chunk`) | `PeerConnectionManager.ts` | pause threshold |
-| Backpressure low | **4 MB** (`16×chunk`) | `PeerConnectionManager.ts` | resume threshold |
+| Backpressure high | **8 MB** | `PeerConnectionManager.ts` | pause threshold |
+| Backpressure low | **4 MB** | `PeerConnectionManager.ts` | resume threshold |
+| Sender read-ahead | **4 chunks** | `PeerConnectionManager.ts` | bounded file-read pipeline |
 | Control prefix | `__rift_ctrl__` | `PeerConnectionManager.ts` | control-frame sentinel |
-| STUN server | `stun:stun.l.google.com:19302` | `PeerConnectionManager.ts` | NAT traversal (no TURN yet) |
+| ICE servers | Google STUN plus optional TURN | `frontend/src/config.ts` | direct paths are allowed; TURN is fallback |
 | DataChannel | `"file-transfer"`, `ordered:true` | `PeerConnectionManager.ts` | the transfer channel |
 
 ---
