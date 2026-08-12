@@ -1,3 +1,5 @@
+import { iceServers } from "@/src/config";
+
 const CONTROL_PREFIX = "__rift_ctrl__";
 const CHUNK_SIZE = 256 * 1024; //256kb
 const MAX_READ_AHEAD = 4;
@@ -35,6 +37,8 @@ export class PeerConnectionManager {
   private dc: RTCDataChannel | null = null;
   private remotePeerId: string;
   private incomingTransfer: IncomingTransfer | null = null;
+  private pendingCandidates: RTCIceCandidateInit[] = [];
+  private remoteDescriptionSet = false;
 
   onMessage?: (data: string | ArrayBuffer) => void;
   onOpen?: () => void;
@@ -86,6 +90,8 @@ export class PeerConnectionManager {
   // Called by receiver after receiving offer
   public async handleOffer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
+    this.remoteDescriptionSet = true;
+    await this.flushCandidates();
     const answer = await this.pc!.createAnswer();
     await this.pc!.setLocalDescription(answer);
     this.getWs().send(
@@ -101,10 +107,16 @@ export class PeerConnectionManager {
   // Called by sender after receiving answer
   public async handleAnswer(sdp: RTCSessionDescriptionInit) {
     await this.pc!.setRemoteDescription(sdp);
+    this.remoteDescriptionSet = true;
+    await this.flushCandidates();
   }
 
   // Called when WS receives { type: "candidate", data: ..., from: remotePeerId }
   public async handleCandidate(candidate: RTCIceCandidateInit) {
+    if (!this.remoteDescriptionSet) {
+      this.pendingCandidates.push(candidate);
+      return;
+    }
     await this.pc!.addIceCandidate(candidate);
   }
 
@@ -182,6 +194,8 @@ export class PeerConnectionManager {
     this.pc = null;
     this.dc = null;
     this.incomingTransfer = null;
+    this.pendingCandidates = [];
+    this.remoteDescriptionSet = false;
   }
 
   public isOpen() {
@@ -190,7 +204,7 @@ export class PeerConnectionManager {
 
   private createPeerConnection() {
     this.pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers,
     });
 
     this.pc.onconnectionstatechange = () => {
@@ -214,6 +228,14 @@ export class PeerConnectionManager {
         );
       }
     };
+  }
+
+  private async flushCandidates() {
+    const candidates = this.pendingCandidates;
+    this.pendingCandidates = [];
+    for (const candidate of candidates) {
+      await this.pc!.addIceCandidate(candidate);
+    }
   }
 
   private getChunkSize() {

@@ -528,7 +528,7 @@ One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
 | Backpressure low | **4 MB** | `PeerConnectionManager.ts` | resume threshold |
 | Sender read-ahead | **4 chunks** | `PeerConnectionManager.ts` | bounded file-read pipeline |
 | Control prefix | `__rift_ctrl__` | `PeerConnectionManager.ts` | control-frame sentinel |
-| STUN server | `stun:stun.l.google.com:19302` | `PeerConnectionManager.ts` | NAT traversal (no TURN yet) |
+| ICE servers | Google STUN plus optional TURN | `frontend/src/config.ts` | direct paths are allowed; TURN is fallback |
 | DataChannel | `"file-transfer"`, `ordered:true` | `PeerConnectionManager.ts` | the transfer channel |
 
 ---

@@ -123,7 +123,7 @@ Planned and in‑progress work:
 - 🔐 **Optional passphrase‑based app‑layer E2E encryption** on top of the DataChannel
 - ♻️ **Resumable transfers** with chunk‑range reconciliation after a drop
 - 📁 **Folder transfers** and richer multi‑file queueing
-- 🔀 **TURN relay fallback** for the strictest NATs and firewalls (config path already stubbed)
+- 🔀 **TURN relay fallback** for the strictest NATs and firewalls (optional coturn configuration)
 - 💾 **Streaming to disk** via the File System Access API (Blob fallback remains for unsupported browsers)
 - 🧾 **Integrity verification** — end‑to‑end checksum before the save prompt
 - 🛡️ **Abuse controls** — invite rate limiting and payload size caps
@@ -179,7 +179,7 @@ rift/
 
 **Backend** — Hono · Bun runtime · native WebSocket · Zod · TypeScript
 
-**Connectivity** — Google STUN (`stun.l.google.com:19302`), TURN‑ready abstraction for later
+**Connectivity** — Google STUN (`stun.l.google.com:19302`) plus optional TURN
 
 ---
 
@@ -227,11 +227,16 @@ NEXT_PUBLIC_API_URL=http://localhost:4000
 # Optional
 NEXT_PUBLIC_APP_ENV=development
 NEXT_PUBLIC_ENABLE_ANALYTICS=false
+
+# Optional self-hosted coturn. Keep these values in .env.local, not in git.
+NEXT_PUBLIC_TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
+NEXT_PUBLIC_TURN_USERNAME=rift
+NEXT_PUBLIC_TURN_CREDENTIAL=replace-me
 ```
 
 For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). Deploy the frontend anywhere that runs Next.js and the backend on any Bun‑friendly host (Fly, Railway, Render, a VPS…).
 
-> ⚠️ **Note:** With STUN‑only connectivity, some strict/symmetric NATs and firewalls will fail to establish a direct connection. A TURN relay fallback is on the [roadmap](#-roadmap); until then, plug your own TURN server into the ICE config for maximum reach.
+> ⚠️ **Note:** With STUN‑only connectivity, some strict/symmetric NATs and firewalls will fail. For a free option, self-host [coturn](https://github.com/coturn/coturn) on a small VPS, open UDP/TCP 3478 and a relay port range, then add its URLs and credentials to `frontend/.env.local`. Direct connections remain preferred; TURN only relays when needed.
 
 ---
 

@@ -14,5 +14,23 @@ export const env = {
 
 export const wsUrl = env.apiUrl.replace(/^http/, "ws");
 
+const turnUrls = (process.env.NEXT_PUBLIC_TURN_URLS || "")
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
+
+export const iceServers: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  ...(turnUrls.length > 0 &&
+  process.env.NEXT_PUBLIC_TURN_USERNAME &&
+  process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+    ? [{
+        urls: turnUrls,
+        username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+        credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+      }]
+    : []),
+];
+
 // This ensures your config is deeply read-only
 export type EnvConfig = typeof env;
