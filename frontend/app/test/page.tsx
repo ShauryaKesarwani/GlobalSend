@@ -21,6 +21,13 @@ type TransferProgress = {
   transferredBytes: number;
   totalBytes: number;
   direction: "send" | "receive";
+  speedBps: number;
+};
+
+type SpeedSample = {
+  lastBytes: number;
+  lastTs: number;
+  speed: number;
 };
 
 type ReceivedFile = {
@@ -92,6 +99,7 @@ export default function TransferTestPage() {
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const autoInviteSentToRef = useRef<string | null>(null);
   const connectPeerIdRef = useRef<string | null>(null);
+  const speedTrackerRef = useRef<Map<string, SpeedSample>>(new Map());
 
   const locationSearch = useSyncExternalStore(
     subscribeToLocationSearch,
@@ -115,6 +123,28 @@ export default function TransferTestPage() {
     useState<AutoConnectStatus>("idle");
 
   const addLog = (msg: string) => setLogs((prev) => [...prev.slice(-79), msg]);
+
+  const trackSpeed = (id: string, transferredBytes: number) => {
+    const now = performance.now();
+    const sample = speedTrackerRef.current.get(id);
+    if (!sample) {
+      speedTrackerRef.current.set(id, {
+        lastBytes: transferredBytes,
+        lastTs: now,
+        speed: 0,
+      });
+      return 0;
+    }
+    const dt = now - sample.lastTs;
+    if (dt > 0 && transferredBytes > sample.lastBytes) {
+      const instant = ((transferredBytes - sample.lastBytes) * 1000) / dt;
+      sample.speed =
+        sample.speed === 0 ? instant : sample.speed * 0.6 + instant * 0.4;
+      sample.lastBytes = transferredBytes;
+      sample.lastTs = now;
+    }
+    return sample.speed;
+  };
 
   useEffect(() => {
     receivedFilesRef.current = receivedFiles;
@@ -163,6 +193,7 @@ export default function TransferTestPage() {
         setMessages((prev) => [...prev, `${peerId}: ${preview}`]);
       },
       onFileStart: (peerId, file) => {
+        speedTrackerRef.current.delete(file.id);
         setTransferProgress((prev) => [
           ...prev.filter((item) => item.id !== file.id),
           {
@@ -172,10 +203,12 @@ export default function TransferTestPage() {
             transferredBytes: 0,
             totalBytes: file.size,
             direction: "receive",
+            speedBps: 0,
           },
         ]);
       },
       onFileProgress: (peerId, progress) => {
+        const speed = trackSpeed(progress.id, progress.transferredBytes);
         setTransferProgress((prev) => {
           const knownName =
             progress.direction === "send"
@@ -189,12 +222,14 @@ export default function TransferTestPage() {
             transferredBytes: progress.transferredBytes,
             totalBytes: progress.totalBytes,
             direction: progress.direction,
+            speedBps: speed,
           };
 
           return [...prev.filter((item) => item.id !== progress.id), next];
         });
       },
       onFileComplete: (peerId, file) => {
+        speedTrackerRef.current.delete(file.id);
         if (file.objectUrl) setReceivedFiles((prev) => [file, ...prev]);
         setTransferProgress((prev) =>
           prev.map((item) =>
@@ -319,6 +354,7 @@ export default function TransferTestPage() {
       for (const file of selectedFiles) {
         const progressId = `${selectedPeerId}:${file.name}`;
         sentFileNamesRef.current.set(selectedPeerId, file.name);
+        speedTrackerRef.current.delete(progressId);
         setTransferProgress((prev) => [
           ...prev.filter((item) => item.id !== progressId),
           {
@@ -328,6 +364,7 @@ export default function TransferTestPage() {
             transferredBytes: 0,
             totalBytes: file.size,
             direction: "send",
+            speedBps: 0,
           },
         ]);
 
@@ -519,6 +556,11 @@ export default function TransferTestPage() {
                         </div>
                         <div className="mt-2 text-xs text-stone-500">
                           {formatBytes(item.transferredBytes)} / {formatBytes(item.totalBytes)}
+                          {item.speedBps > 0 && (
+                            <span className="text-stone-600">
+                              {" "}· {formatBytes(item.speedBps)}/s
+                            </span>
+                          )}
                         </div>
                       </div>
                     );

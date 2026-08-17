@@ -89,7 +89,7 @@ Both are regenerated per session. Nothing is persisted; a peer disappears from t
                │                                                      │
                └──────────────────────────────────────────────────────┘
                           WebRTC DataChannel  (data plane)
-                     file manifest + 256 KB binary chunks
+                     file manifest + 64 KB binary chunks
                      DIRECT browser-to-browser, server not involved
 ```
 
@@ -314,7 +314,7 @@ The channel multiplexes **three** kinds of frames:
    ```
    `CONTROL_PREFIX = "__rift_ctrl__"`. Everything after the prefix is JSON.
 
-2. **Binary chunk** — a raw `ArrayBuffer`, up to `CHUNK_SIZE = 256 KB`. Belongs to the transfer whose `file-meta` most recently arrived.
+2. **Binary chunk** — a raw `ArrayBuffer`, up to `CHUNK_SIZE = 64 KB`. Belongs to the transfer whose `file-meta` most recently arrived.
 
 3. **Plain string** — any string *not* starting with the prefix → surfaced via `onMessage` (used for the text-ping test path).
 
@@ -358,9 +358,9 @@ A ──►  __rift_ctrl__{"kind":"file-complete", id}
 
 The sender gates on `dc.bufferedAmount` to avoid unbounded memory ([`PeerConnectionManager.ts:282`](frontend/webrtc/PeerConnectionManager.ts#L282)):
 
-- **High watermark** = 8 MB → pause sending.
-- **Low watermark** = 4 MB → resume on `bufferedamountlow`.
-- The sender keeps up to 4 file reads in flight and caps each message at the negotiated SCTP `maxMessageSize`, up to 256 KB.
+- **High watermark** = 2 MB → pause sending.
+- **Low watermark** = 1 MB → resume on `bufferedamountlow`.
+- The sender keeps up to 8 file reads in flight and caps each message at the negotiated SCTP `maxMessageSize`, up to 64 KB.
 
 ---
 
@@ -523,10 +523,10 @@ One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
 | Presence TTL | **45 s** | `cleanup.ts` | idle time before eviction |
 | Reconnect backoff | `1s → 30s` cap | `ws.ts` | `BACKOFF_BASE_MS`=1000, `BACKOFF_MAX_MS`=30000 |
 | Reconnect fallback | **2 s** | `ws.ts` | higher-id peer waits before re-inviting |
-| Chunk size | **256 KB** | `PeerConnectionManager.ts` | `CHUNK_SIZE = 256*1024` |
-| Backpressure high | **8 MB** | `PeerConnectionManager.ts` | pause threshold |
-| Backpressure low | **4 MB** | `PeerConnectionManager.ts` | resume threshold |
-| Sender read-ahead | **4 chunks** | `PeerConnectionManager.ts` | bounded file-read pipeline |
+| Chunk size | **64 KB** | `PeerConnectionManager.ts` | `CHUNK_SIZE = 64*1024` |
+| Backpressure high | **2 MB** | `PeerConnectionManager.ts` | pause threshold |
+| Backpressure low | **1 MB** | `PeerConnectionManager.ts` | resume threshold |
+| Sender read-ahead | **8 chunks** | `PeerConnectionManager.ts` | bounded file-read pipeline |
 | Control prefix | `__rift_ctrl__` | `PeerConnectionManager.ts` | control-frame sentinel |
 | ICE servers | Google STUN plus optional TURN | `frontend/src/config.ts` | direct paths are allowed; TURN is fallback |
 | DataChannel | `"file-transfer"`, `ordered:true` | `PeerConnectionManager.ts` | the transfer channel |

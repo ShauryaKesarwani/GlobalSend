@@ -85,7 +85,7 @@ The transfer lifecycle, one line per step:
 | ✅ | **Invite / accept handshake** | Consent‑based — nothing sends until the receiver accepts |
 | ✅ | **Multiple‑file transfers** | Queue and send several files in one session |
 | ✅ | **QR code + deep‑link pairing** | Scan from a second device to auto‑connect to a peer |
-| ✅ | **Chunked streaming with backpressure** | 256 KB chunks, `bufferedAmount` high/low watermarks |
+| ✅ | **Chunked streaming with backpressure** | 64 KB chunks, `bufferedAmount` high/low watermarks |
 | ✅ | **Live progress** | Per‑file transferred / total bytes, both send and receive |
 | ✅ | **Reconnection resilience** | WebSocket auto‑reconnects with exponential backoff and restores in‑flight peer connections |
 | ✅ | **Ephemeral anonymous identity** | Random session ID + alias generated per tab — no sign‑up, nothing stored |

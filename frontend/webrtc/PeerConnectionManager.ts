@@ -1,10 +1,10 @@
 import { iceServers } from "@/src/config";
 
 const CONTROL_PREFIX = "__rift_ctrl__";
-const CHUNK_SIZE = 256 * 1024; //256kb
-const MAX_READ_AHEAD = 4;
-const HIGH_WATER_MARK = 8 * 1024 * 1024;
-const LOW_WATER_MARK = 4 * 1024 * 1024;
+const CHUNK_SIZE = 64 * 1024; //64kb — smaller chunks cut head-of-line blocking on lossy paths
+const MAX_READ_AHEAD = 8;
+const HIGH_WATER_MARK = 2 * 1024 * 1024;
+const LOW_WATER_MARK = 1 * 1024 * 1024;
 
 type FileManifest = {
   kind: "file-meta";
