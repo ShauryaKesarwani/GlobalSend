@@ -61,18 +61,18 @@ The key idea: **your file bytes never travel through our servers.** The backend 
                  └──────┬──────┘            └──────┬──────┘
                         │                          │
                         └──────────────────────────┘
-                     WebRTC DataChannel (encrypted)
-                        file bytes, direct P2P
+                  WebRTC DataChannel shards (encrypted)
+                    file bytes, direct P2P, striped
 ```
 
 The transfer lifecycle, one line per step:
 
 1. **A** clicks *Send* → app sends a `transfer-invite` over the WebSocket.
 2. **B** sees a popup, clicks *Accept* → app sends `transfer-accept`.
-3. **A** creates an `RTCDataChannel`, builds an SDP **offer**, relays it via the server.
-4. **B** answers; both sides exchange **ICE candidates** through the server.
-5. The browser picks the best network path → the **DataChannel opens**.
-6. **A** streams a file manifest, then chunks. **B** reassembles and gets a download. **The server is now out of the loop.**
+3. **A** creates several `RTCPeerConnection`/`RTCDataChannel` shards, builds SDP **offers**, and relays them via the server.
+4. **B** answers each shard; both sides exchange **ICE candidates** through the server.
+5. The browser picks the best network paths → the **DataChannel shards open**.
+6. **A** stripes indexed chunks across the active shards. **B** reassembles them in order. **The server is now out of the loop.**
 
 ---
 
@@ -80,7 +80,7 @@ The transfer lifecycle, one line per step:
 
 | | Feature | Notes |
 |---|---|---|
-| ✅ | **Internet‑wide P2P transfer** | WebRTC DataChannel with Google STUN for NAT traversal |
+| ✅ | **Internet‑wide P2P transfer** | WebRTC DataChannels with configurable STUN/TURN |
 | ✅ | **Live presence list** | See who's online in real time via WebSocket heartbeats |
 | ✅ | **Invite / accept handshake** | Consent‑based — nothing sends until the receiver accepts |
 | ✅ | **Multiple‑file transfers** | Queue and send several files in one session |
@@ -179,7 +179,7 @@ rift/
 
 **Backend** — Hono · Bun runtime · native WebSocket · Zod · TypeScript
 
-**Connectivity** — Google STUN (`stun.l.google.com:19302`) plus optional TURN
+**Connectivity** — multiple STUN/TURN candidates plus configurable parallel WebRTC connections
 
 ---
 
@@ -228,15 +228,23 @@ NEXT_PUBLIC_API_URL=http://localhost:4000
 NEXT_PUBLIC_APP_ENV=development
 NEXT_PUBLIC_ENABLE_ANALYTICS=false
 
+# Optional. Comma-separated STUN URLs.
+NEXT_PUBLIC_STUN_URLS=stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478
+
 # Optional self-hosted coturn. Keep these values in .env.local, not in git.
-NEXT_PUBLIC_TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
+# Include TCP/TLS on port 443 for restrictive networks such as college Wi-Fi.
+NEXT_PUBLIC_TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp
 NEXT_PUBLIC_TURN_USERNAME=rift
 NEXT_PUBLIC_TURN_CREDENTIAL=replace-me
+
+# Optional tuning.
+NEXT_PUBLIC_ICE_TRANSPORT_POLICY=all
+NEXT_PUBLIC_TRANSFER_SHARDS=3
 ```
 
 For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). Deploy the frontend anywhere that runs Next.js and the backend on any Bun‑friendly host (Fly, Railway, Render, a VPS…).
 
-> ⚠️ **Note:** With STUN‑only connectivity, some strict/symmetric NATs and firewalls will fail. For a free option, self-host [coturn](https://github.com/coturn/coturn) on a small VPS, open UDP/TCP 3478 and a relay port range, then add its URLs and credentials to `frontend/.env.local`. Direct connections remain preferred; TURN only relays when needed.
+> ⚠️ **Note:** STUN cannot bypass a firewall that blocks peer traffic. For college or corporate Wi-Fi, use a coturn server with `turns:` on TCP 443, a valid TLS certificate, and a configured relay port range. Direct connections remain preferred when `NEXT_PUBLIC_ICE_TRANSPORT_POLICY=all`; TURN is used when needed. `NEXT_PUBLIC_TRANSFER_SHARDS` controls parallel PeerConnections and defaults to 3.
 
 ---
 

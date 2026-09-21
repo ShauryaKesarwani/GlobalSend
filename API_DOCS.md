@@ -6,7 +6,7 @@
 > both sides. Written so a future you — or an agent — can navigate the system without
 > re-reading the whole codebase.
 
-**Stack at a glance:** Next.js 16 / React 19 frontend · Hono + Bun WebSocket backend · WebRTC DataChannels · Zod-validated signaling · Google STUN.
+**Stack at a glance:** Next.js 16 / React 19 frontend · Hono + Bun WebSocket backend · sharded WebRTC DataChannels · Zod-validated signaling · configurable STUN/TURN.
 
 ---
 
@@ -250,7 +250,7 @@ Any `offer` / `answer` / `candidate` / `transfer-*` sent by another peer arrives
 |---|---|---|
 | `join` | C→S | register presence, broadcast `peer_joined`, reply `peer_list` |
 | `heartbeat` | C→S | refresh `lastSeen` |
-| `offer` / `answer` / `candidate` | C→S→C | relay to `to`, add `from` |
+| `offer` / `answer` / `candidate` | C→S→C | relay to `to`, add `from`; each has a `shardId` |
 | `transfer-invite` / `-accept` / `-decline` | C→S→C | relay to `to`, add `from` |
 | `peer_list` | S→C | sent to the joiner only |
 | `peer_joined` / `peer_left` | S→C | broadcast to all connected clients |
@@ -259,7 +259,7 @@ Any `offer` / `answer` / `candidate` / `transfer-*` sent by another peer arrives
 
 ## 6. WebRTC signaling flow
 
-The WebSocket is only the **matchmaker**. Here's the exact handshake that upgrades two peers to a direct DataChannel. Managed by [`PeerConnectionManager`](frontend/webrtc/PeerConnectionManager.ts) and orchestrated by [`WSClient`](frontend/lib/ws.ts).
+The WebSocket is only the **matchmaker**. The client opens several independent WebRTC connections per peer. Each connection has one ordered DataChannel and its own SCTP congestion window. Managed by [`PeerConnectionManager`](frontend/webrtc/PeerConnectionManager.ts) and grouped by [`WSClient`](frontend/lib/ws.ts).
 
 ```
 SENDER (A)                        SERVER                      RECEIVER (B)
@@ -267,21 +267,21 @@ SENDER (A)                        SERVER                      RECEIVER (B)
    │── transfer-invite {file} ───────────────────────────────────►│   B sees popup
    │◄──────────────────────────────────── transfer-accept ────────│   B clicks Accept
    │                                                              │
- initAsSender()                                          sendTransferAccept()
- • createDataChannel                                     • getOrCreatePeer → initAsReceiver()
- • createAndSendOffer()                                  • pc.ondatachannel armed
-   │                                                              │
-   │── offer {sdp} ──────────────────────────────────────────────►│  handleOffer()
+  initAsSender()                                          sendTransferAccept()
+  • create one DataChannel per shard                         • initAsReceiver()
+  • send one offer per shard                                 • pc.ondatachannel armed
+    │                                                              │
+    │── offer {sdp, shardId} ────────────────────────────────────►│  handleOffer()
    │                                                              │  • setRemoteDescription
    │                                                              │  • createAnswer
-   │◄──────────────────────────────────── answer {sdp} ───────────│  • setLocalDescription
+    │◄──────────────────────────── answer {sdp, shardId} ─────────│  • setLocalDescription
  handleAnswer()                                                   │
  • setRemoteDescription                                           │
    │                                                              │
    │◄════ candidate ══════════════════════════════════════════════►│  (both directions,
    │      handleCandidate() on both sides, repeated N times        │   many candidates)
    │                                                              │
-   │══════════════ DataChannel "file-transfer" OPENS ═════════════│  onOpen() fires both sides
+    │══════════ DataChannel shards "file-transfer" OPEN ══════════│  one per shard
    │                                                              │
    └────────────── file bytes flow directly, no server ───────────┘
 ```
@@ -290,19 +290,19 @@ SENDER (A)                        SERVER                      RECEIVER (B)
 
 | Step | Sender (A) | Receiver (B) |
 |---|---|---|
-| Trigger | receives `transfer-accept` → `initAsSender()` | clicks Accept → `sendTransferAccept()` → `initAsReceiver()` |
-| DataChannel | **creates** it (`createDataChannel`) | **waits** for it (`pc.ondatachannel`) |
-| SDP | `createOffer` → send | `handleOffer` → `createAnswer` → send |
+| Trigger | receives `transfer-accept` → starts all configured shards | clicks Accept → `sendTransferAccept()` → starts receiver shards |
+| DataChannel | **creates** one per shard (`createDataChannel`) | **waits** for each (`pc.ondatachannel`) |
+| SDP | `createOffer` → send with `shardId` | `handleOffer` → `createAnswer` → send with `shardId` |
 | Answer | `handleAnswer` (store remote) | — |
 | ICE | `onicecandidate` → relay; `handleCandidate` | same |
 
-> ⚠️ The DataChannel must exist **before** `createOffer()`, otherwise the channel isn't advertised in the SDP. Only the sender creates it — if both did, you'd get a sync conflict.
+> ⚠️ Each DataChannel must exist **before** its shard's `createOffer()`. Only the sender creates channels; the receiver waits for them through `pc.ondatachannel`.
 
 ---
 
 ## 7. WebRTC DataChannel protocol (device ↔ device)
 
-Once open, the channel `"file-transfer"` (`ordered: true`, `binaryType: "arraybuffer"`) carries a tiny app-level framing protocol. Defined in [`PeerConnectionManager.ts`](frontend/webrtc/PeerConnectionManager.ts).
+Once open, every shard channel (`ordered: true`, `binaryType: "arraybuffer"`) carries a tiny app-level framing protocol. Chunks are distributed across shards and include a global chunk index. Defined in [`PeerConnectionManager.ts`](frontend/webrtc/PeerConnectionManager.ts) and [`ws.ts`](frontend/lib/ws.ts).
 
 ### Frame types
 
@@ -314,7 +314,7 @@ The channel multiplexes **three** kinds of frames:
    ```
    `CONTROL_PREFIX = "__rift_ctrl__"`. Everything after the prefix is JSON.
 
-2. **Binary chunk** — a raw `ArrayBuffer`, up to `CHUNK_SIZE = 64 KB`. Belongs to the transfer whose `file-meta` most recently arrived.
+2. **Binary chunk** — an 8-byte header (`RIFT` magic + uint32 chunk index) followed by up to `CHUNK_SIZE = 64 KB` of file bytes.
 
 3. **Plain string** — any string *not* starting with the prefix → surfaced via `onMessage` (used for the text-ping test path).
 
@@ -328,9 +328,10 @@ The channel multiplexes **three** kinds of frames:
   "id": "b1946ac9-...-uuid",
   "name": "photo.jpg",
   "mimeType": "image/jpeg",
-  "size": 20480,
-  "chunkSize": 262144,
-  "chunkCount": 1
+   "size": 20480,
+   "chunkSize": 65536,
+   "chunkCount": 1,
+   "shardCount": 3
 }
 ```
 
@@ -343,16 +344,13 @@ The channel multiplexes **three** kinds of frames:
 ### Wire sequence for one file
 
 ```
-A ──►  __rift_ctrl__{"kind":"file-meta", id, name, size, chunkCount, ...}
-A ──►  <ArrayBuffer chunk 1>        │ B accumulates into buffers[]
-A ──►  <ArrayBuffer chunk 2>        │ B fires onFileProgress each chunk
-A ──►  ...                          │
-A ──►  <ArrayBuffer chunk N>        │
-A ──►  __rift_ctrl__{"kind":"file-complete", id}
-                                     │ B closes disk sink or assembles Blob fallback
+A ──►  file-meta on each active shard
+A ──►  indexed chunks across shards │ B stores out-of-order chunks
+A ──►  file-complete on each shard  │ B writes contiguous indexes in order
+                                      │ B closes disk sink or assembles Blob fallback
 ```
 
-**Receiver assembly:** the receiver opens a File System Access writable when supported and queues chunks into it in arrival order. Browsers without that API retain the existing in-memory `ArrayBuffer[]` and `Blob` fallback. A denied or unavailable save picker also falls back automatically.
+**Receiver assembly:** the receiver opens a File System Access writable when supported, buffers only chunks that arrive ahead of the next expected index, and writes chunks in file order. Browsers without that API retain the in-memory `ArrayBuffer[]` and `Blob` fallback. A denied or unavailable save picker also falls back automatically.
 
 ### Backpressure
 
@@ -440,7 +438,7 @@ QR is generated client-side with the `qrcode` lib (error-correction `M`, scale 6
 
 ### `frontend/lib/ws.ts` — `class WSClient`
 
-The orchestrator. Owns the socket, reconnection, and a `Map<peerId, PeerConnectionManager>`.
+The orchestrator. Owns the socket, reconnection, and a `Map<peerId, PeerConnectionGroup>`. Each group owns the configured shard PeerConnections and the shared indexed-chunk assembler.
 
 **Construction:** `new WSClient(sessionId, alias, handlers)` — connects immediately.
 
@@ -463,8 +461,8 @@ The orchestrator. Owns the socket, reconnection, and a `Map<peerId, PeerConnecti
 | `connect` | opens the WS, wires `onopen/onmessage/onclose/onerror` |
 | `scheduleReconnect` | exponential backoff `1s→2s→…→30s` cap |
 | `handleMessage` | dispatch on incoming server messages (see §5.2) |
-| `initAsSender` / `getOrCreatePeer` | create a `PeerConnectionManager` in the right role |
-| `createPeerConnection` | build a peer + attach all callbacks; passes a **getter** `() => this.ws` so the peer always uses the current socket after a reconnect |
+| `initAsSender` / `getOrCreatePeer` | create the shard group in the right role |
+| `PeerConnectionGroup` | manage shard signaling, striped sending, and indexed receiver assembly |
 | `rememberOpenPeersForReconnect` / `restorePeerConnections` | remember open channels on drop, re-invite on reconnect (lower `sessionId` re-invites; higher waits with a 2s fallback) |
 | `startHeartbeat` / `stopHeartbeat` | 15s heartbeat interval |
 | `safeSend` | drops sends silently if the socket isn't open |
@@ -473,9 +471,9 @@ The orchestrator. Owns the socket, reconnection, and a `Map<peerId, PeerConnecti
 
 ### `frontend/webrtc/PeerConnectionManager.ts` — `class PeerConnectionManager`
 
-One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
+One instance per shard. Wraps one `RTCPeerConnection` + one `RTCDataChannel`.
 
-**Construction:** `new PeerConnectionManager(getWs: () => WebSocket, remotePeerId: string)`
+**Construction:** `new PeerConnectionManager(getWs: () => WebSocket, remotePeerId: string, shardId: number)`
 
 **Role entry points:**
 
@@ -497,19 +495,24 @@ One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
 | Method | Signature | Effect |
 |---|---|---|
 | `sendMessage` | `(data: string \| ArrayBuffer) → void` | raw send if channel open |
-| `sendFile` | `(file, { onProgress }?) → Promise` | manifest → chunked send w/ backpressure → complete |
+| `sendFileMeta` / `sendFileComplete` | `(manifest)` / `(transferId)` | control frames for the group transfer |
+| `sendChunk` | `(index, data) → Promise` | indexed binary send with per-shard backpressure |
+| `getChunkSize` | `() → number` | negotiated payload size for this shard |
 | `close` | `() → void` | close channel + peer, reset state |
 | `isOpen` | `() → boolean` | channel `readyState === "open"` |
 
 **Private internals:** `createPeerConnection` (STUN config + `onicecandidate` relay + `onconnectionstatechange`), `createAndSendOffer`, `setupDataChannelListeners`, `handleDataChannelMessage` (control vs binary vs plain), `sendControlMessage`, `waitForBufferedAmountLow`.
 
-**Callbacks:** `onMessage`, `onOpen`, `onClose`, `onFileStart`, `onFileProgress`, `onFileComplete`, `onLog`.
+**Callbacks:** `onMessage`, `onOpen`, `onClose`, `onFileMeta`, `onFileChunk`, `onFileComplete`, `onLog`.
 
 ### `frontend/src/config.ts`
 | Symbol | Purpose |
 |---|---|
 | `env` | typed env: `apiUrl`, `env`, `isProduction`, `enableAnalytics` |
 | `wsUrl` | `apiUrl` with `http`→`ws` rewrite |
+| `iceServers` | comma-separated STUN/TURN candidates, with built-in STUN fallback |
+| `iceTransportPolicy` | `all` by default, optionally `relay` |
+| `transferShardCount` | configured parallel PeerConnections, clamped to 1–4 |
 
 ---
 
@@ -528,8 +531,9 @@ One instance per remote peer. Wraps `RTCPeerConnection` + `RTCDataChannel`.
 | Backpressure low | **1 MB** | `PeerConnectionManager.ts` | resume threshold |
 | Sender read-ahead | **8 chunks** | `PeerConnectionManager.ts` | bounded file-read pipeline |
 | Control prefix | `__rift_ctrl__` | `PeerConnectionManager.ts` | control-frame sentinel |
-| ICE servers | Google STUN plus optional TURN | `frontend/src/config.ts` | direct paths are allowed; TURN is fallback |
-| DataChannel | `"file-transfer"`, `ordered:true` | `PeerConnectionManager.ts` | the transfer channel |
+| ICE servers | Configurable STUN/TURN list | `frontend/src/config.ts` | use TURN/TLS on TCP 443 for restrictive networks |
+| Transfer shards | **3** by default, configurable 1–4 | `frontend/src/config.ts` | independent PeerConnections per peer |
+| DataChannel | `"file-transfer"`, `ordered:true` per shard | `PeerConnectionManager.ts` | indexed chunks are striped across shards |
 
 ---
 
@@ -544,18 +548,18 @@ One complete transfer, every hop, in order:
  4. B loads /test, connects, joins → both see each other in presence
  5. A clicks "Send"      → A → S → B: {transfer-invite, file}
  6. B clicks "Accept"    → B → S → A: {transfer-accept}
- 7. A: initAsSender() → createDataChannel → createOffer
-        A → S → B: {offer, sdp}
- 8. B: handleOffer → createAnswer
-        B → S → A: {answer, sdp}
- 9. A: handleAnswer                 (SDP exchange complete)
-10. both: onicecandidate → {candidate} relayed → handleCandidate (repeat)
-11. ICE picks a path → DataChannel "file-transfer" OPENS → onOpen both sides
-12. A → B: __rift_ctrl__{file-meta}
-13. A → B: <chunk> × N            (backpressure-gated; B reports progress)
-14. A → B: __rift_ctrl__{file-complete}
+  7. A: create one DataChannel + offer per shard
+         A → S → B: {offer, sdp, shardId}
+  8. B: handle each offer → create answers
+         B → S → A: {answer, sdp, shardId}
+  9. A: handle each answer             (SDP exchanges complete)
+ 10. both: candidates carry shardId and are relayed to the matching PC
+ 11. ICE picks paths → DataChannel shards open → group reports ready
+ 12. A → B: indexed file-meta on active shards
+ 13. A → B: indexed chunks striped across shards (backpressure per shard)
+ 14. A → B: file-complete on every active shard
 15. B: Blob(buffers) → object URL → download prompt → onFileComplete
-    ── server was never in the byte path (steps 12–15) ──
+     ── server was never in the byte path (steps 12–15) ──
 16. On WS drop: A/B auto-reconnect (backoff), re-join, and re-invite remembered
     peers to restore the DataChannel.
 ```

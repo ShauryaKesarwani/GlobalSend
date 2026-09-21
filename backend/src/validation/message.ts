@@ -14,18 +14,21 @@ export const messageSchema = z.discriminatedUnion("type", [
     type: z.literal("offer"),
     to: z.string(),
     data: z.any(),
+    shardId: z.number().int().nonnegative().default(0),
   }),
 
   z.object({
     type: z.literal("answer"),
     to: z.string(),
     data: z.any(),
+    shardId: z.number().int().nonnegative().default(0),
   }),
 
   z.object({
     type: z.literal("candidate"),
     to: z.string(),
     data: z.any(),
+    shardId: z.number().int().nonnegative().default(0),
   }),
 
   // --- transfer handshake ---
