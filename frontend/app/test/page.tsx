@@ -32,6 +32,8 @@ type SpeedSample = {
   speed: number;
 };
 
+const SPEED_SMOOTHING_MS = 2500;
+
 type ReceivedFile = {
   id: string;
   from: string;
@@ -143,8 +145,8 @@ export default function TransferTestPage() {
     const dt = now - sample.lastTs;
     if (dt > 0 && transferredBytes > sample.lastBytes) {
       const instant = ((transferredBytes - sample.lastBytes) * 1000) / dt;
-      sample.speed =
-        sample.speed === 0 ? instant : sample.speed * 0.6 + instant * 0.4;
+      const weight = 1 - Math.exp(-dt / SPEED_SMOOTHING_MS);
+      sample.speed += (instant - sample.speed) * weight;
       sample.lastBytes = transferredBytes;
       sample.lastTs = now;
     }
@@ -577,7 +579,7 @@ export default function TransferTestPage() {
                     </p>
                   )}
                   {transferProgress.map((item) => {
-                    const percent = item.totalBytes === 0 ? 0 : Math.min(100, Math.round((item.transferredBytes / item.totalBytes) * 100));
+                    const percent = item.totalBytes === 0 ? 0 : Math.min(100, (item.transferredBytes / item.totalBytes) * 100);
                     return (
                       <div key={item.id} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -587,10 +589,17 @@ export default function TransferTestPage() {
                               {item.direction === "send" ? "sending" : "receiving"} · {item.peerId}
                             </div>
                           </div>
-                          <div className="text-sm text-stone-600">{percent}%</div>
+                          <div className="text-sm text-stone-600">{Math.floor(percent)}%</div>
                         </div>
-                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200">
-                          <div className="h-full rounded-full bg-stone-900 transition-all" style={{ width: `${percent}%` }} />
+                        <div
+                          className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200"
+                          role="progressbar"
+                          aria-label={`${item.fileName} ${item.direction === "send" ? "send" : "receive"} progress`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.floor(percent)}
+                        >
+                          <div className="h-full rounded-full bg-stone-900 transition-[width] duration-100 ease-linear" style={{ width: `${percent}%` }} />
                         </div>
                         <div className="mt-2 text-xs text-stone-500">
                           {formatBytes(item.transferredBytes)} / {formatBytes(item.totalBytes)}
