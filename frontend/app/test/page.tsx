@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { PeerQrCode } from "@/components/PeerQrCode";
 import {
   getConnectPeerAlias,
   getConnectPeerId,
 } from "@/lib/peerDeepLink";
 import { WSClient } from "@/lib/ws";
+import { messageUrl } from "@/lib/messageUrl";
 
 type Peer = { id: string; alias: string };
 type IncomingInvite = {
@@ -38,6 +40,8 @@ type ReceivedFile = {
   size: number;
   objectUrl: string;
 };
+
+type ChannelMessage = { from: string; text: string };
 
 type AutoConnectStatus =
   | "idle"
@@ -115,7 +119,8 @@ export default function TransferTestPage() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedPeerId, setSelectedPeerId] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
-  const [messages, setMessages] = useState<string[]>([]);
+  const [messages, setMessages] = useState<ChannelMessage[]>([]);
+  const [messageDraft, setMessageDraft] = useState("");
   const [error, setError] = useState<string>("");
   const [transferProgress, setTransferProgress] = useState<TransferProgress[]>([]);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
@@ -183,6 +188,7 @@ export default function TransferTestPage() {
       },
       onDataChannelOpen: (peerId) => {
         setConnectedPeers((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
+        toast.success("Data channel connected", { description: `Ready to send to ${peerId}` });
         if (peerId === connectPeerIdRef.current) setAutoConnectStatus("connected");
       },
       onDataChannelClose: (peerId) => {
@@ -190,7 +196,11 @@ export default function TransferTestPage() {
       },
       onDataChannelMessage: (peerId, data) => {
         const preview = typeof data === "string" ? data : `[binary ${data.byteLength} bytes]`;
-        setMessages((prev) => [...prev, `${peerId}: ${preview}`]);
+        if (typeof data === "string") {
+          setMessages((prev) => [...prev, { from: peerId, text: data }]);
+        } else {
+          setMessages((prev) => [...prev, { from: peerId, text: preview }]);
+        }
       },
       onFileStart: (peerId, file) => {
         speedTrackerRef.current.delete(file.id);
@@ -335,6 +345,27 @@ export default function TransferTestPage() {
     if (!invite) return;
     clientRef.current?.sendTransferDecline(invite.from);
     setInvite(null);
+  };
+
+  const sendTextMessage = () => {
+    const text = messageDraft.trim();
+    if (!text || !selectedPeerId || !connectedPeers.includes(selectedPeerId)) {
+      setError("Connect to a peer before sending a message.");
+      return;
+    }
+    clientRef.current?.sendDataChannelMessage(selectedPeerId, text);
+    setMessages((prev) => [...prev, { from: "You", text }]);
+    setMessageDraft("");
+    setError("");
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Could not access clipboard");
+    }
   };
 
   const sendSelectedFiles = async () => {
@@ -496,13 +527,6 @@ export default function TransferTestPage() {
                           >
                             Select peer
                           </button>
-                          <button
-                            onClick={() => clientRef.current?.sendDataChannelMessage(peer.id, "hello over WebRTC")}
-                            disabled={!isConnected}
-                            className="rounded-full border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 transition enabled:hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Ping channel
-                          </button>
                         </div>
                       </div>
                     );
@@ -528,6 +552,20 @@ export default function TransferTestPage() {
                 >
                   Send selected files now
                 </button>
+              </div>
+
+              <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
+                <h2 className="text-lg font-semibold text-stone-900">Send a message or link</h2>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={messageDraft}
+                    onChange={(event) => setMessageDraft(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Enter") sendTextMessage(); }}
+                    placeholder="Type text or paste a link"
+                    className="min-w-0 flex-1 rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm outline-none focus:border-stone-500"
+                  />
+                  <button onClick={sendTextMessage} className="rounded-full bg-stone-900 px-5 py-3 text-sm font-medium text-white hover:bg-stone-700">Send message</button>
+                </div>
               </div>
 
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
@@ -598,45 +636,34 @@ export default function TransferTestPage() {
         <aside className="space-y-6 rounded-4xl border border-stone-300/80 bg-stone-950 p-6 text-stone-100 shadow-[0_20px_70px_rgba(33,24,13,0.35)]">
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-stone-400">Incoming request</p>
-            {!invite ? (
-              <p className="mt-3 text-sm leading-6 text-stone-300">No pending invite right now.</p>
-            ) : (
-              <div className="mt-4 rounded-3xl border border-amber-300/30 bg-amber-100/10 p-4 text-sm text-stone-100">
-                <div className="font-medium">
-                  {invite.file
-                    ? `${invite.from} wants to send ${invite.file.name}.`
-                    : `${invite.from} wants to connect.`}
-                </div>
-                <div className="mt-2 text-stone-300">
-                  {invite.file
-                    ? `${invite.file.name} · ${formatBytes(invite.file.size)}`
-                    : "Accept to open a WebRTC data channel. Files can be selected and sent later."}
-                </div>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    onClick={acceptInvite}
-                    className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-emerald-950 transition hover:bg-emerald-400"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    onClick={declineInvite}
-                    className="rounded-full border border-stone-500 px-4 py-2 text-sm font-medium text-stone-100 transition hover:bg-stone-800"
-                  >
-                    Decline
-                  </button>
-                </div>
-              </div>
-            )}
+            <p className="mt-3 text-sm leading-6 text-stone-300">Incoming requests appear in a floating prompt.</p>
           </div>
 
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-stone-400">Channel messages</p>
             <div className="mt-4 max-h-56 space-y-2 overflow-y-auto rounded-3xl bg-stone-900 p-4 text-sm text-stone-300">
               {messages.length === 0 ? (
-                <p>No manual data-channel messages yet.</p>
+                <p>No messages yet.</p>
               ) : (
-                messages.map((message, index) => <div key={`${message}-${index}`}>{message}</div>)
+                messages.map((message, index) => {
+                  const url = messageUrl(message.text);
+                  return (
+                    <div key={`${message.from}-${index}`} className="rounded-2xl bg-stone-800 p-3">
+                      <div className="mb-1 text-xs text-stone-400">{message.from}</div>
+                      {url ? (
+                        <div className="flex items-center gap-2 break-all">
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 text-amber-300 underline">{message.text} <span aria-label="opens in new tab">↗</span></a>
+                          <button onClick={() => void copyText(message.text)} className="shrink-0 rounded-full border border-stone-600 px-3 py-1 text-xs hover:bg-stone-700">Copy</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{message.text}</span>
+                          <button onClick={() => void copyText(message.text)} className="shrink-0 rounded-full border border-stone-600 px-3 py-1 text-xs hover:bg-stone-700">Copy</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -651,6 +678,16 @@ export default function TransferTestPage() {
           </div>
         </aside>
       </div>
+      {invite && (
+        <div role="dialog" aria-live="polite" className="fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-3xl border border-amber-300/50 bg-stone-950 p-5 text-stone-100 shadow-2xl">
+          <div className="font-medium">{invite.file ? `${invite.from} wants to send ${invite.file.name}.` : `${invite.from} wants to connect.`}</div>
+          <div className="mt-1 text-sm text-stone-300">{invite.file ? `${invite.file.name} · ${formatBytes(invite.file.size)}` : "Accept to open a WebRTC data channel."}</div>
+          <div className="mt-4 flex gap-2">
+            <button onClick={acceptInvite} className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400">Accept</button>
+            <button onClick={declineInvite} className="rounded-full border border-stone-500 px-4 py-2 text-sm hover:bg-stone-800">Decline</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

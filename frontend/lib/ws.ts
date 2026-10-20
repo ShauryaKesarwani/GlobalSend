@@ -390,11 +390,22 @@ export class WSClient {
   private reconnectTimer: number | null = null;
   private isDisposed = false;
   private isFirstConnect = true;
+  private handleVisibilityChange = () => {
+    if (document.visibilityState !== "visible" || this.isDisposed) return;
+    if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) return;
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.log("Tab became visible; reconnecting WebSocket now");
+    this.connect();
+  };
 
   constructor(sessionId: string, alias: string, handlers: Handlers) {
     this.sessionId = sessionId;
     this.alias = alias;
     this.handlers = handlers;
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.connect();
   }
 
@@ -537,6 +548,7 @@ export class WSClient {
 
   public dispose() {
     this.isDisposed = true;
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.stopHeartbeat();
     if (this.reconnectTimer !== null) {
       window.clearTimeout(this.reconnectTimer);

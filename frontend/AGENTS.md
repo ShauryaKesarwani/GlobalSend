@@ -7,3 +7,5 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This is a high-performance file transfer application built with Bun, Next.js 16, Tailwind v4, and Shadcn UI, focused on end-to-end encryption.
 
 Refer to .agents/skills/api-sync/SKILL.md for instructions on keeping API documentation updated.
+
+Keep code simple, minimal, and easy to follow. Prefer established libraries for common tasks when they fit; avoid long abstractions and tangled control flow. Add tests for new behavior and keep them focused.
