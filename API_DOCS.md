@@ -1,6 +1,6 @@
-# Rift — System & API Reference
+# GlobalSend File Transfer — System & API Reference
 
-> A living map of every connection, message, and function in Rift as it stands today.
+> A living map of every connection, message, and function in GlobalSend's file-transfer product as it stands today.
 > Covers the **HTTP** surface, the **WebSocket signaling protocol** (frontend ↔ backend),
 > the **WebRTC DataChannel protocol** (device ↔ device), and a **function reference** for
 > both sides. Written so a future you — or an agent — can navigate the system without
@@ -29,7 +29,7 @@
 
 ## 1. The big picture
 
-Rift has **three logical planes**:
+GlobalSend file transfer has **three logical planes**:
 
 | Plane | Transport | Carries | Code |
 |---|---|---|---|

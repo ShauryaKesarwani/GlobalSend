@@ -5,12 +5,12 @@ export default function Home() {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f8f1df,transparent_45%),linear-gradient(180deg,#f6f3ea_0%,#ebe4d4_100%)] px-6 py-16 text-stone-900">
       <div className="mx-auto flex max-w-4xl flex-col gap-8 rounded-4xl border border-stone-300/70 bg-white/70 p-8 shadow-[0_24px_80px_rgba(71,51,24,0.12)] backdrop-blur">
         <div className="space-y-4">
-          <p className="text-sm uppercase tracking-[0.3em] text-stone-500">Rift</p>
+          <p className="text-sm uppercase tracking-[0.3em] text-stone-500">GlobalSend</p>
           <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-stone-900 sm:text-5xl">
-            Browser-to-browser transfer testing lives here now.
+            Peer-to-peer products for moving things across the internet.
           </h1>
           <p className="max-w-2xl text-base leading-7 text-stone-700 sm:text-lg">
-            Use the dedicated test surface to open two tabs, connect peers, and send real files over WebRTC without pushing file bytes through the backend.
+            GlobalSend is an ecosystem of products built on peer-to-peer technology. Start with direct browser-to-browser file transfers: connect to another device and send files over WebRTC without routing file bytes through a server.
           </p>
         </div>
 

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rift",
+      "name": "globalsend",
       "dependencies": {
         "@next/third-parties": "^16.2.12",
         "next": "16.2.10",

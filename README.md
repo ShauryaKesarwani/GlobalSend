@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌀 Rift
+# 🌐 GlobalSend
 
 ### Peer‑to‑peer file transfer that works across the internet — right from your browser.
 
@@ -27,9 +27,9 @@ No installs. No accounts. No files touching a server. Just open a tab, pick a pe
 
 ---
 
-## ✨ What is Rift?
+## ✨ What is GlobalSend?
 
-**Rift** is an open‑source, browser‑to‑browser file transfer tool. Two people open the app, see each other in a live presence list, and send files **directly** to one another over an encrypted [WebRTC](https://webrtc.org/) DataChannel.
+**GlobalSend** is an open‑source peer-to-peer technology ecosystem. Its first product is browser-to-browser file transfer: two people open the app, see each other in a live presence list, and send files **directly** to one another over an encrypted [WebRTC](https://webrtc.org/) DataChannel.
 
 The key idea: **your file bytes never travel through our servers.** The backend only helps two browsers find each other and shake hands (signaling + presence). Once the connection is established, the server steps out of the way and bytes flow peer‑to‑peer.
 
@@ -93,9 +93,9 @@ The transfer lifecycle, one line per step:
 
 ---
 
-## 🆚 How Rift compares
+## 🆚 How GlobalSend file transfer compares
 
-|  | **🌀 Rift** | **[LocalSend](https://localsend.org/)** | **[Magic Wormhole](https://github.com/magic-wormhole/magic-wormhole)** |
+|  | **🌐 GlobalSend** | **[LocalSend](https://localsend.org/)** | **[Magic Wormhole](https://github.com/magic-wormhole/magic-wormhole)** |
 |---|:---:|:---:|:---:|
 | **Install required** | ❌ None (web app) | ✅ Native app per OS | ✅ CLI / Python |
 | **Works across the internet** | ✅ Yes | ❌ LAN only | ✅ Yes |
@@ -108,11 +108,11 @@ The transfer lifecycle, one line per step:
 
 **Where each shines:**
 
-- **LocalSend** is fantastic for the same Wi‑Fi network and gives you polished native apps — but it can't reach a friend across the country. Rift's whole point is working *beyond* the LAN.
-- **Magic Wormhole** is a brilliant, battle‑tested CLI with strong end‑to‑end crypto, but it's terminal‑bound and routes data through a transit relay when a direct connection fails. Rift aims for a direct browser‑to‑browser path and a zero‑friction, no‑install UX.
-- **Rift** trades native‑app depth for reach and convenience: nothing to install, works over the internet, and runs anywhere a modern browser does.
+- **LocalSend** is fantastic for the same Wi‑Fi network and gives you polished native apps — but it can't reach a friend across the country. GlobalSend file transfer is designed to work *beyond* the LAN.
+- **Magic Wormhole** is a brilliant, battle‑tested CLI with strong end‑to‑end crypto, but it's terminal‑bound and routes data through a transit relay when a direct connection fails. GlobalSend aims for a direct browser‑to‑browser path and a zero‑friction, no‑install UX.
+- **GlobalSend** brings file transfers to any modern browser, with nothing to install and support for sending over the internet.
 
-> 💡 Rift's WebRTC handshake and chunking approach draw inspiration from **LocalSend's** open implementation — huge thanks to that project (see [Credits](#-credits)).
+> 💡 GlobalSend's WebRTC handshake and chunking approach draw inspiration from **LocalSend's** open implementation — huge thanks to that project (see [Credits](#-credits)).
 
 ---
 
@@ -135,14 +135,14 @@ See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full design document.
 
 ## 🏗️ Architecture
 
-Rift is split into three planes:
+The GlobalSend file-transfer product is split into three planes:
 
 - **Control plane** — presence + signaling, over WebSocket (`backend`)
 - **Data plane** — the actual file bytes, strictly browser‑to‑browser over WebRTC (`frontend`)
 - **Persistence plane** — metadata only; **never** file blobs *(planned: Neon Postgres)*
 
 ```
-rift/
+globalsend/
 ├── backend/                 # Hono + Bun WebSocket signaling server
 │   └── src/
 │       ├── index.ts         # HTTP + WS entrypoint, /health, /ws
@@ -185,13 +185,13 @@ rift/
 
 ## 🚀 Getting started (self‑hosting)
 
-Rift is meant to be self‑hosted — run your own signaling backend and frontend. You'll need [**Bun**](https://bun.sh/) installed.
+GlobalSend file transfer is designed to be self‑hosted — run your own signaling backend and frontend. You'll need [**Bun**](https://bun.sh/) installed.
 
 ### 1. Clone
 
 ```sh
-git clone https://github.com/ShauryaKesarwani/GlobalSend.git rift
-cd rift
+git clone https://github.com/ShauryaKesarwani/GlobalSend.git globalsend
+cd globalsend
 ```
 
 ### 2. Run the backend (signaling server)
@@ -234,7 +234,7 @@ NEXT_PUBLIC_STUN_URLS=stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478
 # Optional self-hosted coturn. Keep these values in .env.local, not in git.
 # Include TCP/TLS on port 443 for restrictive networks such as college Wi-Fi.
 NEXT_PUBLIC_TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp
-NEXT_PUBLIC_TURN_USERNAME=rift
+NEXT_PUBLIC_TURN_USERNAME=globalsend
 NEXT_PUBLIC_TURN_CREDENTIAL=replace-me
 
 # Optional tuning.
@@ -255,7 +255,7 @@ For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the f
 - **Anonymous & ephemeral** — identities are random per session and expire on disconnect. No accounts, no persistent user data.
 - **Validated inputs** — all signaling messages are Zod‑validated server‑side.
 
-Rift is under active development and has not undergone a formal security audit. Review the code before using it for sensitive data.
+GlobalSend is under active development and has not undergone a formal security audit. Review the code before using it for sensitive data.
 
 ---
 
@@ -267,7 +267,7 @@ Contributions are welcome! Whether it's the frontend, the signaling backend, doc
 
 ## 🙏 Credits
 
-- **[LocalSend](https://localsend.org/)** — a superb open‑source local file‑sharing project whose implementation was a valuable reference for parts of Rift's WebRTC transfer flow. Go star it.
+- **[LocalSend](https://localsend.org/)** — a superb open‑source local file‑sharing project whose implementation was a valuable reference for parts of GlobalSend's WebRTC transfer flow. Go star it.
 - **[Magic Wormhole](https://github.com/magic-wormhole/magic-wormhole)** — inspiration for friction‑free, code‑based pairing.
 - Built with WebRTC, Hono, Next.js, and Bun.
 
@@ -275,7 +275,7 @@ Contributions are welcome! Whether it's the frontend, the signaling backend, doc
 
 ## 📄 License
 
-Released under the **MIT License** — free to use, modify, and self‑host. *(Add a `LICENSE` file to the repo to make this official.)*
+Released under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE) for the full terms.
 
 <div align="center">
 <br />
