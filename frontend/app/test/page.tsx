@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { PeerQrCode } from "@/components/PeerQrCode";
+import { TransferDock } from "@/components/TransferDock";
 import {
   getConnectPeerAlias,
   getConnectPeerId,
@@ -71,10 +72,6 @@ function formatFileCount(count: number) {
   return `${count} file${count === 1 ? "" : "s"}`;
 }
 
-function sanitizeDownloadName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
 function describeAutoConnectStatus(
   status: AutoConnectStatus,
   peerId: string,
@@ -102,7 +99,6 @@ function describeAutoConnectStatus(
 export default function TransferTestPage() {
   const clientRef = useRef<WSClient | null>(null);
   const selectedPeerRef = useRef<string | null>(null);
-  const sentFileNamesRef = useRef<Map<string, string>>(new Map());
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const autoInviteSentToRef = useRef<string | null>(null);
   const connectPeerIdRef = useRef<string | null>(null);
@@ -121,6 +117,8 @@ export default function TransferTestPage() {
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
   const [invite, setInvite] = useState<IncomingInvite | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [selectedPeerId, setSelectedPeerId] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
@@ -245,10 +243,8 @@ export default function TransferTestPage() {
       onFileProgress: (peerId, progress) => {
         const speed = trackSpeed(progress.id, progress.transferredBytes);
         setTransferProgress((prev) => {
-          const knownName =
-            progress.direction === "send"
-              ? sentFileNamesRef.current.get(peerId) ?? "selected-file"
-              : prev.find((item) => item.id === progress.id)?.fileName ?? "incoming-file";
+          const knownName = prev.find((item) => item.id === progress.id)?.fileName
+            ?? (progress.direction === "send" ? "selected-file" : "incoming-file");
 
           const next: TransferProgress = {
             id: progress.id,
@@ -303,7 +299,6 @@ export default function TransferTestPage() {
     setError("");
     selectedPeerRef.current = peer.id;
     setSelectedPeerId(peer.id);
-    sentFileNamesRef.current.set(peer.id, selectedFiles.map((file) => file.name).join(", "));
     const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
     clientRef.current?.sendTransferInvite(
       peer.id,
@@ -394,6 +389,7 @@ export default function TransferTestPage() {
   };
 
   const sendSelectedFiles = async () => {
+    if (sendingRef.current) return;
     if (selectedFiles.length === 0 || !selectedPeerId) {
       setError("Pick a peer and wait for the WebRTC connection before sending files.");
       return;
@@ -405,11 +401,12 @@ export default function TransferTestPage() {
     }
 
     setError("");
+    sendingRef.current = true;
+    setSending(true);
 
     try {
       for (const file of selectedFiles) {
         const progressId = `${selectedPeerId}:${file.name}`;
-        sentFileNamesRef.current.set(selectedPeerId, file.name);
         speedTrackerRef.current.delete(progressId);
         setTransferProgress((prev) => [
           ...prev.filter((item) => item.id !== progressId),
@@ -431,6 +428,9 @@ export default function TransferTestPage() {
       const message = sendError instanceof Error ? sendError.message : "Unknown send error";
       setError(message);
       addLog(`Send failed: ${message}`);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -443,7 +443,7 @@ export default function TransferTestPage() {
     : "";
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f0e3c2,transparent_40%),linear-gradient(180deg,#f6f3eb_0%,#ddd2bb_100%)] px-4 py-8 text-stone-900 sm:px-6">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f0e3c2,transparent_40%),linear-gradient(180deg,#f6f3eb_0%,#ddd2bb_100%)] px-4 pt-8 pb-[32rem] text-stone-900 sm:px-6 lg:pb-72">
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="rounded-4xl border border-stone-300/80 bg-white/80 p-6 shadow-[0_20px_70px_rgba(58,41,19,0.14)] backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-stone-200 pb-5">
@@ -471,58 +471,6 @@ export default function TransferTestPage() {
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
             <div className="space-y-6">
-              <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
-                <label htmlFor="transfer-files" className="block text-sm font-medium text-stone-700">Select files</label>
-                <input
-                  id="transfer-files"
-                  type="file"
-                  multiple
-                  className="mt-3 block w-full rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm text-stone-700 file:mr-4 file:rounded-full file:border-0 file:bg-stone-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-50 hover:file:bg-stone-700"
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files ?? []);
-                    setSelectedFiles(files);
-                    setError("");
-                    event.target.value = "";
-                  }}
-                />
-                <label htmlFor="transfer-media" className="mt-4 block text-sm font-medium text-stone-700">Select photos or videos</label>
-                <input
-                  id="transfer-media"
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  className="mt-3 block w-full rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm text-stone-700 file:mr-4 file:rounded-full file:border-0 file:bg-stone-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-50 hover:file:bg-stone-700"
-                  onChange={(event) => {
-                    setSelectedFiles(Array.from(event.target.files ?? []));
-                    setError("");
-                    event.target.value = "";
-                  }}
-                />
-                <p className="mt-3 text-xs leading-5 text-stone-500">
-                  Files are streamed directly to disk when supported. Other browsers use an in-memory download fallback.
-                </p>
-                {selectedFiles.length > 0 && (
-                  <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-stone-700 shadow-sm">
-                    <div className="font-medium text-stone-900">
-                      {formatFileCount(selectedFiles.length)} selected · {formatBytes(selectedFiles.reduce((sum, file) => sum + file.size, 0))} total
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {selectedFiles.map((file, index) => (
-                        <div key={`${file.name}-${file.size}-${index}`} className="rounded-xl bg-stone-50 px-3 py-2">
-                          <div className="font-medium text-stone-800">{file.name}</div>
-                          <div>{formatBytes(file.size)} · {file.type || "application/octet-stream"}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {error && (
-                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
-                  </div>
-                )}
-              </div>
-
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold text-stone-900">Online peers</h2>
@@ -576,24 +524,6 @@ export default function TransferTestPage() {
             </div>
 
             <div className="space-y-6">
-              <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold text-stone-900">Send the actual files</h2>
-                    <p className="mt-1 text-sm text-stone-600">Connect to a peer first, then choose files anytime and send them directly.</p>
-                  </div>
-                  <div className="text-sm text-stone-600">
-                    Target: <strong>{selectedPeerId || "none"}</strong>
-                  </div>
-                </div>
-                <button
-                  onClick={() => void sendSelectedFiles()}
-                  className="mt-4 rounded-full bg-amber-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-amber-500"
-                >
-                  Send selected files now
-                </button>
-              </div>
-
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
                 <h2 className="text-lg font-semibold text-stone-900">Send a message or link</h2>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -653,29 +583,6 @@ export default function TransferTestPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
-                <h2 className="text-lg font-semibold text-stone-900">Received files</h2>
-                <div className="mt-4 space-y-3">
-                  {receivedFiles.length === 0 && (
-                    <p className="rounded-2xl border border-dashed border-stone-300 px-4 py-6 text-sm text-stone-600">
-                      Incoming files will appear here with a safe download link once the transfer completes.
-                    </p>
-                  )}
-                  {receivedFiles.map((file) => (
-                    <div key={file.id} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-                      <div className="font-medium text-stone-900">{file.name}</div>
-                      <div className="mt-1 text-sm text-stone-600">From {file.from} · {formatBytes(file.size)}</div>
-                      <a
-                        href={file.objectUrl}
-                        download={sanitizeDownloadName(file.name)}
-                        className="mt-3 inline-flex rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition hover:bg-stone-700"
-                      >
-                        Download file
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -725,6 +632,15 @@ export default function TransferTestPage() {
           </div>
         </aside>
       </div>
+      <TransferDock
+        selectedFiles={selectedFiles}
+        receivedFiles={receivedFiles}
+        onSelect={(files) => { setSelectedFiles(files); setError(""); }}
+        onSend={() => void sendSelectedFiles()}
+        sending={sending}
+        target={selectedPeerId}
+        error={error}
+      />
       {invite && (
         <div role="dialog" aria-live="polite" className="fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-3xl border border-amber-300/50 bg-stone-950 p-5 text-stone-100 shadow-2xl">
           <div className="font-medium">{invite.file ? `${invite.from} wants to send ${invite.file.name}.` : `${invite.from} wants to connect.`}</div>
@@ -738,7 +654,5 @@ export default function TransferTestPage() {
     </main>
   );
 }
-
-
 
 

@@ -73,9 +73,10 @@ const BACKOFF_BASE_MS = 1000;
 const BACKOFF_MAX_MS = 30000;
 const MAX_READ_AHEAD = 8;
 
-class PeerConnectionGroup {
+export class PeerConnectionGroup {
   private shards = new Map<number, PeerConnectionManager>();
-  private incomingTransfer: IncomingTransfer | null = null;
+  private incomingTransfers = new Map<string, IncomingTransfer>();
+  private shardTransfers = new Map<number, string>();
   private openWasReported = false;
   private closed = false;
 
@@ -225,7 +226,8 @@ class PeerConnectionGroup {
     this.closed = true;
     for (const shard of this.shards.values()) shard.close();
     this.shards.clear();
-    this.incomingTransfer = null;
+    this.incomingTransfers.clear();
+    this.shardTransfers.clear();
   }
 
   private getOrCreateShard(shardId: number) {
@@ -252,8 +254,8 @@ class PeerConnectionGroup {
       }
     };
     shard.onMessage = (data) => this.onMessage?.(data);
-    shard.onFileMeta = (meta) => this.handleFileMeta(meta);
-    shard.onFileChunk = (chunk) => this.handleFileChunk(chunk);
+    shard.onFileMeta = (meta) => this.handleFileMeta(shardId, meta);
+    shard.onFileChunk = (chunk) => this.handleFileChunk(shardId, chunk);
     shard.onFileComplete = (transferId) =>
       this.handleFileComplete(shardId, transferId);
     shard.onLog = (message) => this.onLog?.(`${this.remotePeerId}: ${message}`);
@@ -265,14 +267,11 @@ class PeerConnectionGroup {
     return [...this.shards.entries()].filter(([, shard]) => shard.isOpen());
   }
 
-  private handleFileMeta(meta: FileManifest) {
-    if (this.incomingTransfer?.meta.id === meta.id) return;
-    if (this.incomingTransfer) {
-      this.onLog?.("Ignoring a new file while another file is still arriving");
-      return;
-    }
+  private handleFileMeta(shardId: number, meta: FileManifest) {
+    this.shardTransfers.set(shardId, meta.id);
+    if (this.incomingTransfers.has(meta.id)) return;
 
-    this.incomingTransfer = {
+    this.incomingTransfers.set(meta.id, {
       meta,
       buffers: [],
       pendingChunks: new Map(),
@@ -283,13 +282,14 @@ class PeerConnectionGroup {
       sink: null,
       sinkReady: this.openFileSink(meta),
       writeChain: Promise.resolve(),
-    };
+    });
     this.onFileStart?.(meta);
   }
 
-  private handleFileChunk(chunk: { index: number; data: ArrayBuffer }) {
-    const transfer = this.incomingTransfer;
-    if (!transfer || transfer.pendingChunks.has(chunk.index)) return;
+  private handleFileChunk(shardId: number, chunk: { index: number; data: ArrayBuffer }) {
+    const transferId = this.shardTransfers.get(shardId);
+    const transfer = transferId ? this.incomingTransfers.get(transferId) : undefined;
+    if (!transfer || chunk.index < transfer.nextChunkIndex || chunk.index >= transfer.meta.chunkCount || transfer.pendingChunks.has(chunk.index)) return;
 
     transfer.pendingChunks.set(chunk.index, chunk.data);
     transfer.receivedChunks += 1;
@@ -321,8 +321,9 @@ class PeerConnectionGroup {
   }
 
   private handleFileComplete(shardId: number, transferId: string) {
-    const transfer = this.incomingTransfer;
-    if (!transfer || transfer.meta.id !== transferId) return;
+    const transfer = this.incomingTransfers.get(transferId);
+    if (!transfer || this.shardTransfers.get(shardId) !== transferId) return;
+    this.shardTransfers.delete(shardId);
     transfer.completedShards.add(shardId);
     this.tryCompleteIncoming(transfer);
   }
@@ -336,7 +337,7 @@ class PeerConnectionGroup {
       return;
     }
 
-    this.incomingTransfer = null;
+    this.incomingTransfers.delete(transfer.meta.id);
     void (async () => {
       await transfer.writeChain;
       const sink = await transfer.sinkReady;
