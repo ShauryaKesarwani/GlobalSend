@@ -106,20 +106,31 @@ class PeerConnectionGroup {
 
   public initAsSender() {
     for (let shardId = 0; shardId < this.shardCount; shardId += 1) {
-      this.getOrCreateShard(shardId).initAsSender();
+      void this.getOrCreateShard(shardId).initAsSender().catch((error) => this.failInitialization(error));
     }
   }
 
   public initAsReceiver() {
     for (let shardId = 0; shardId < this.shardCount; shardId += 1) {
-      this.getOrCreateShard(shardId).initAsReceiver();
+      void this.getOrCreateShard(shardId).initAsReceiver().catch((error) => this.failInitialization(error));
     }
   }
 
   public async handleOffer(shardId: number, sdp: RTCSessionDescriptionInit) {
     const shard = this.getOrCreateShard(shardId);
-    shard.initAsReceiver();
-    await shard.handleOffer(sdp);
+    try {
+      await shard.initAsReceiver();
+      await shard.handleOffer(sdp);
+    } catch (error) {
+      this.failInitialization(error);
+    }
+  }
+
+  private failInitialization(error: unknown) {
+    if (this.closed) return;
+    this.onLog?.(`WebRTC setup failed: ${String(error)}`);
+    this.close();
+    this.onClose?.();
   }
 
   public async handleAnswer(shardId: number, sdp: RTCSessionDescriptionInit) {

@@ -1,4 +1,4 @@
-import { iceServers, iceTransportPolicy } from "@/src/config";
+import { fetchIceConfig, fetchTurnConfig } from "./iceConfig";
 
 const CONTROL_PREFIX = "__rift_ctrl__";
 const CHUNK_SIZE = 64 * 1024;
@@ -30,7 +30,9 @@ export class PeerConnectionManager {
   private dc: RTCDataChannel | null = null;
   private remoteDescriptionSet = false;
   private pendingCandidates: RTCIceCandidateInit[] = [];
-  private initialized = false;
+  private initialization: Promise<void> | null = null;
+  private generation = 0;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMessage?: (data: string | ArrayBuffer) => void;
   onOpen?: () => void;
@@ -46,19 +48,17 @@ export class PeerConnectionManager {
     private shardId: number,
   ) {}
 
-  public initAsSender() {
-    if (this.initialized) return;
-    this.initialized = true;
-    this.createPeerConnection();
+  public async initAsSender() {
+    await this.initialize();
+    if (!this.pc || this.dc) return;
     this.dc = this.pc!.createDataChannel("file-transfer", { ordered: true });
     this.setupDataChannelListeners();
-    void this.createAndSendOffer();
+    await this.createAndSendOffer();
   }
 
-  public initAsReceiver() {
-    if (this.initialized) return;
-    this.initialized = true;
-    this.createPeerConnection();
+  public async initAsReceiver() {
+    await this.initialize();
+    if (!this.pc) return;
     this.pc!.ondatachannel = (event) => {
       this.dc = event.channel;
       this.setupDataChannelListeners();
@@ -133,17 +133,50 @@ export class PeerConnectionManager {
   }
 
   public close() {
+    this.generation++;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
     this.dc?.close();
     this.pc?.close();
     this.dc = null;
     this.pc = null;
     this.pendingCandidates = [];
     this.remoteDescriptionSet = false;
-    this.initialized = false;
+    this.initialization = null;
   }
 
-  private createPeerConnection() {
-    this.pc = new RTCPeerConnection({ iceServers, iceTransportPolicy });
+  private initialize() {
+    if (this.initialization) return this.initialization;
+    const generation = this.generation;
+    this.initialization = (async () => {
+      const config = await fetchIceConfig();
+      if (generation !== this.generation) throw new Error("Connection closed during initialization");
+      this.createPeerConnection(config.iceServers);
+      this.scheduleRefresh(config.ttl, generation);
+    })().catch((error) => {
+      if (generation === this.generation) this.initialization = null;
+      throw error;
+    });
+    return this.initialization;
+  }
+
+  private scheduleRefresh(ttl: number, generation: number) {
+    this.refreshTimer = setTimeout(async () => {
+      try {
+        const config = await fetchTurnConfig();
+        if (generation !== this.generation || !this.pc) return;
+        this.pc.setConfiguration({ ...this.pc.getConfiguration(), iceServers: config.iceServers });
+        this.scheduleRefresh(config.ttl, generation);
+      } catch (error) {
+        if (generation !== this.generation) return;
+        this.onLog?.(`TURN refresh failed: ${String(error)}`);
+        this.scheduleRefresh(60, generation);
+      }
+    }, Math.max(1000, ttl * 800));
+  }
+
+  private createPeerConnection(iceServers: RTCIceServer[]) {
+    this.pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all" });
 
     this.pc.onconnectionstatechange = () => {
       const state = this.pc?.connectionState;

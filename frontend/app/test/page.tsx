@@ -9,6 +9,7 @@ import {
 } from "@/lib/peerDeepLink";
 import { WSClient } from "@/lib/ws";
 import { messageUrl } from "@/lib/messageUrl";
+import { takeSharedFiles } from "@/lib/sharedFiles";
 
 type Peer = { id: string; alias: string };
 type IncomingInvite = {
@@ -106,6 +107,7 @@ export default function TransferTestPage() {
   const autoInviteSentToRef = useRef<string | null>(null);
   const connectPeerIdRef = useRef<string | null>(null);
   const speedTrackerRef = useRef<Map<string, SpeedSample>>(new Map());
+  const handledShareRef = useRef<string | null>(null);
 
   const locationSearch = useSyncExternalStore(
     subscribeToLocationSearch,
@@ -130,6 +132,27 @@ export default function TransferTestPage() {
     useState<AutoConnectStatus>("idle");
 
   const addLog = (msg: string) => setLogs((prev) => [...prev.slice(-79), msg]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get("shared");
+    const failed = url.searchParams.has("shareError");
+    if (!id && !failed) return;
+    if (id && handledShareRef.current === id) return;
+    handledShareRef.current = id;
+    url.searchParams.delete("shared");
+    url.searchParams.delete("shareError");
+    window.history.replaceState(window.history.state, "", url);
+    if (failed) {
+      void Promise.resolve().then(() => setError("Could not receive the shared files. Please select them below instead."));
+    } else if (id) {
+      void takeSharedFiles(id).then((files) => {
+        if (!files.length) throw new Error("No shared files found");
+        setSelectedFiles(files);
+        setError("");
+      }).catch(() => setError("Could not retrieve the shared files. Please select them below instead."));
+    }
+  }, []);
 
   const trackSpeed = (id: string, transferredBytes: number) => {
     const now = performance.now();
@@ -449,8 +472,9 @@ export default function TransferTestPage() {
           <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
             <div className="space-y-6">
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
-                <label className="block text-sm font-medium text-stone-700">Files for transfer test</label>
+                <label htmlFor="transfer-files" className="block text-sm font-medium text-stone-700">Select files</label>
                 <input
+                  id="transfer-files"
                   type="file"
                   multiple
                   className="mt-3 block w-full rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm text-stone-700 file:mr-4 file:rounded-full file:border-0 file:bg-stone-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-50 hover:file:bg-stone-700"
@@ -458,6 +482,20 @@ export default function TransferTestPage() {
                     const files = Array.from(event.target.files ?? []);
                     setSelectedFiles(files);
                     setError("");
+                    event.target.value = "";
+                  }}
+                />
+                <label htmlFor="transfer-media" className="mt-4 block text-sm font-medium text-stone-700">Select photos or videos</label>
+                <input
+                  id="transfer-media"
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  className="mt-3 block w-full rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm text-stone-700 file:mr-4 file:rounded-full file:border-0 file:bg-stone-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-50 hover:file:bg-stone-700"
+                  onChange={(event) => {
+                    setSelectedFiles(Array.from(event.target.files ?? []));
+                    setError("");
+                    event.target.value = "";
                   }}
                 />
                 <p className="mt-3 text-xs leading-5 text-stone-500">
@@ -700,9 +738,6 @@ export default function TransferTestPage() {
     </main>
   );
 }
-
-
-
 
 
 
