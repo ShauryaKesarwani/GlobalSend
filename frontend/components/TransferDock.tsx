@@ -34,8 +34,9 @@ const button = "inline-flex min-h-9 shrink-0 items-center justify-center rounded
 export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, sending, target, error }: Props) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden rounded-t-3xl border border-b-0 border-stone-200 bg-[#faf9f6] pb-[env(safe-area-inset-bottom)] text-stone-900 shadow-[0_-8px_30px_rgba(58,41,19,0.12)] lg:flex-row" aria-label="File transfer controls">
-      <section aria-label="Send files" className="order-1 flex min-w-0 items-center gap-3 px-4 py-3 lg:order-2 lg:flex-1 lg:border-l lg:border-stone-200">
+    <div className="fixed inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-3xl border border-b-0 border-stone-200 bg-[#faf9f6] pb-[env(safe-area-inset-bottom)] text-stone-900 shadow-[0_-8px_30px_rgba(58,41,19,0.12)]" aria-label="File transfer controls">
+      <div className="mx-auto flex max-w-7xl flex-col px-2 sm:px-4 lg:flex-row">
+      <section aria-label="Send files" className="order-1 flex min-w-0 items-center gap-3 px-4 py-4 lg:order-2 lg:flex-1 lg:border-l lg:border-stone-200">
         <button onClick={onSend} disabled={sending || selectedFiles.length === 0} aria-label={sending ? "Sending files" : "Send files"} title={sending ? "Sending files" : "Send files"} className="flex size-16 shrink-0 flex-col items-center justify-center rounded-full bg-stone-900 text-white hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700 disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-500">
           <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
           <span className="text-xs font-medium">{sending ? "Sending" : "All"}</span>
@@ -61,7 +62,7 @@ export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, s
         </div>
       </section>
 
-      <section aria-label="Received files" className="order-2 flex min-w-0 items-center gap-2 border-t border-stone-200 bg-transparent px-4 py-3 lg:order-1 lg:flex-1 lg:border-t-0">
+      <section aria-label="Received files" className="order-2 flex min-w-0 items-center gap-2 border-t border-stone-200 bg-transparent px-4 py-4 lg:order-1 lg:flex-1 lg:border-t-0">
         {receivedFiles.length > 1 && (
           <button className="flex size-8 shrink-0 items-center justify-center rounded-full border border-stone-300 text-lg leading-none hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700" aria-label={expanded ? "Collapse received files" : "Expand received files"} aria-expanded={expanded} aria-controls="received-file-list" onClick={() => setExpanded(!expanded)}>
             <span aria-hidden="true">{expanded ? "⌄" : "⌃"}</span>
@@ -72,13 +73,14 @@ export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, s
             {receivedFiles.map((file) => (
               <li key={file.id} className="flex h-8 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-sm text-stone-700" title={file.name}>{file.name}</span>
-                <a href={file.objectUrl} download={downloadName(file.name)} className="shrink-0 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700" aria-label={`Download ${file.name}`}>Download</a>
+                <a href={file.objectUrl} download={downloadName(file.name)} className="flex size-7 shrink-0 items-center justify-center rounded-full text-stone-600 hover:bg-stone-200 hover:text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700" aria-label={`Download ${file.name}`} title={`Download ${file.name}`}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M5 19h14" /></svg></a>
               </li>
             ))}
           </ul>
         )}
         {receivedFiles.length > 1 && <button aria-label="Download all" title="Download all" className="flex size-16 shrink-0 flex-col items-center justify-center rounded-full bg-stone-900 text-white hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700" onClick={() => downloadAll(receivedFiles)}><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-7-7 7 7 7-7" /></svg><span className="text-xs font-medium">All</span></button>}
       </section>
+      </div>
     </div>
   );
 }
