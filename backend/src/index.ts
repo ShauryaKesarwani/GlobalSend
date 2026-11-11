@@ -26,7 +26,7 @@ app.route("/api", turnRoutes);
 // });
 console.log(`Server running on http://localhost:${port}`);
 serve({
-  fetch: (request, server) => app.fetch(request, { ip: server.requestIP(request)?.address }),
+  fetch: (request, server) => app.fetch(request, { server, ip: server.requestIP(request)?.address }),
   port: port,
   websocket,
 });
