@@ -118,6 +118,7 @@ export default function TransferTestPage() {
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
   const [invite, setInvite] = useState<IncomingInvite | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [selectedPeerId, setSelectedPeerId] = useState<string>("");
@@ -151,6 +152,46 @@ export default function TransferTestPage() {
         setError("");
       }).catch(() => setError("Could not retrieve the shared files. Please select them below instead."));
     }
+  }, []);
+
+  useEffect(() => {
+    let dragDepth = 0;
+    const isFileDrag = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+    const onDragEnter = (event: DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      setDraggingFiles(true);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (isFileDrag(event)) event.preventDefault();
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!isFileDrag(event)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDraggingFiles(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth = 0;
+      setDraggingFiles(false);
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length) {
+        setSelectedFiles(files);
+        setError("");
+      }
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
   }, []);
 
   const trackSpeed = (id: string, transferredBytes: number) => {
@@ -572,7 +613,7 @@ export default function TransferTestPage() {
                           aria-valuemax={100}
                           aria-valuenow={Math.floor(percent)}
                         >
-                          <div className="h-full rounded-full bg-stone-900 transition-[width] duration-100 ease-linear" style={{ width: `${percent}%` }} />
+                          <div className="h-full rounded-full bg-amber-500 transition-[width] duration-100 ease-linear" style={{ width: `${percent}%` }} />
                         </div>
                         <div className="mt-2 text-xs text-stone-500">
                           {formatBytes(item.transferredBytes)} / {formatBytes(item.totalBytes)}
@@ -637,6 +678,19 @@ export default function TransferTestPage() {
           </div>
         </aside>
       </div>
+      {draggingFiles && (
+        <div className="pointer-events-none fixed inset-0 z-[60] bg-stone-950/60 p-4 sm:p-6" aria-hidden="true">
+          <div className="flex h-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-400 bg-orange-50/95 p-6 text-center text-stone-900">
+            <div>
+              <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-orange-100 text-orange-700">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></svg>
+              </div>
+              <p className="mt-5 text-2xl font-semibold tracking-tight">Drop files here</p>
+              <p className="mt-2 text-sm text-stone-600">They’ll be selected for sending.</p>
+            </div>
+          </div>
+        </div>
+      )}
       <TransferDock
         selectedFiles={selectedFiles}
         receivedFiles={receivedFiles}
