@@ -29,53 +29,52 @@ type Props = {
   error: string;
 };
 
-const button = "shrink-0 rounded-full border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700";
+const button = "inline-flex min-h-8 shrink-0 items-center justify-center rounded-md border border-stone-500 px-2.5 py-1 text-xs font-medium text-stone-100 transition hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 
 export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, sending, target, error }: Props) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="fixed inset-x-2 bottom-2 z-40 mx-auto flex max-w-7xl flex-col gap-2 sm:inset-x-4 lg:flex-row lg:items-end" aria-label="File transfer controls">
-      <section aria-label="Send files" className="min-w-0 rounded-2xl border border-stone-300 bg-stone-50 p-3 shadow-xl lg:flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="mr-auto text-sm font-semibold">Send files</h2>
-          <label className={`${button} cursor-pointer`}>
+    <div className="fixed inset-x-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-7xl flex-col overflow-hidden rounded-2xl border border-stone-500 bg-stone-950 text-stone-100 shadow-2xl sm:inset-x-4 lg:flex-row" aria-label="File transfer controls">
+      <section aria-label="Send files" className="order-1 min-w-0 bg-stone-900 px-3 py-2 lg:order-2 lg:flex lg:flex-1 lg:items-center lg:gap-3 lg:border-l lg:border-stone-600">
+        <div className="flex items-center gap-2 lg:order-3 lg:flex-col lg:items-stretch lg:gap-1">
+          <h2 className="mr-auto whitespace-nowrap text-xs font-semibold lg:mx-auto">Select files</h2>
+          <label className={`${button} cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-white`}>
             Photos / videos
-            <input className="sr-only" type="file" accept="image/*,video/*" multiple onChange={(event) => { if (event.target.files?.length) onSelect(Array.from(event.target.files)); event.target.value = ""; }} />
+            <input aria-label="Select photos or videos" className="sr-only" type="file" accept="image/*,video/*" multiple onChange={(event) => { if (event.target.files?.length) onSelect(Array.from(event.target.files)); event.target.value = ""; }} />
           </label>
-          <label className={`${button} cursor-pointer`}>
+          <label className={`${button} cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-white`}>
             Any files
-            <input className="sr-only" type="file" multiple onChange={(event) => { if (event.target.files?.length) onSelect(Array.from(event.target.files)); event.target.value = ""; }} />
+            <input aria-label="Select any files" className="sr-only" type="file" multiple onChange={(event) => { if (event.target.files?.length) onSelect(Array.from(event.target.files)); event.target.value = ""; }} />
           </label>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <ul aria-label="Selected files" className="max-h-20 overflow-y-auto text-sm text-stone-700">
-              {selectedFiles.length ? selectedFiles.map((file, index) => <li className="truncate" key={`${file.name}-${file.size}-${index}`} title={file.name}>{file.name}</li>) : <li>No files selected</li>}
+        <div className="mt-1 flex min-w-0 flex-1 items-center gap-2 lg:mt-0 lg:gap-3">
+          <div className="min-w-0 flex-1 lg:order-2">
+            <ul aria-label="Selected files" className="max-h-14 overflow-y-auto text-xs leading-6 text-stone-200" title={target ? `Target: ${target}` : "No peer selected"}>
+              {selectedFiles.length ? selectedFiles.map((file, index) => <li className="truncate" key={`${file.name}-${file.size}-${index}`} title={file.name}>{file.name}</li>) : <li className="text-stone-400">No files selected</li>}
             </ul>
-            <p className="truncate text-xs text-stone-500">Target: {target || "none selected"}</p>
           </div>
-          <button onClick={onSend} disabled={sending || selectedFiles.length === 0} className="shrink-0 rounded-full bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">{sending ? "Sending…" : "Send files"}</button>
+          <button onClick={onSend} disabled={sending || selectedFiles.length === 0} className={`${button} lg:order-1 disabled:cursor-not-allowed disabled:opacity-40`}>{sending ? "Sending…" : "Send files"}</button>
         </div>
-        {error && <p role="alert" className="mt-2 max-h-12 overflow-y-auto text-xs text-red-700">{error}</p>}
+        {error && <p role="alert" className="mt-1 max-h-10 overflow-y-auto text-xs text-red-300 lg:max-w-32">{error}</p>}
       </section>
 
-      <section aria-label="Received files" className="min-w-0 rounded-2xl border border-stone-300 bg-white p-3 shadow-xl lg:flex-1">
-        <div className="flex items-center gap-2">
-          <h2 className="min-w-0 flex-1 text-sm font-semibold">Received files {receivedFiles.length > 0 && `(${receivedFiles.length})`}</h2>
-          {receivedFiles.length > 1 && <button className={button} onClick={() => downloadAll(receivedFiles)}>Download all</button>}
-          {receivedFiles.length > 1 && <button className={button} aria-expanded={expanded} aria-controls="received-file-list" onClick={() => setExpanded(!expanded)}>{expanded ? "Collapse" : "Expand"}</button>}
-        </div>
-        {receivedFiles.length === 0 ? <p className="mt-2 text-sm text-stone-500">Completed files will appear here.</p> : (
-          <ul id="received-file-list" className={`mt-2 overflow-y-auto ${expanded ? "max-h-[min(40vh,24rem)]" : "max-h-40"}`}>
+      <section aria-label="Received files" className="order-2 flex min-w-0 items-center gap-2 border-t border-stone-500 bg-stone-950 px-3 py-2 lg:order-1 lg:flex-1 lg:border-t-0">
+        {receivedFiles.length > 1 && (
+          <button className="flex size-8 shrink-0 items-center justify-center rounded-full border border-stone-500 text-lg leading-none hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" aria-label={expanded ? "Collapse received files" : "Expand received files"} aria-expanded={expanded} aria-controls="received-file-list" onClick={() => setExpanded(!expanded)}>
+            <span aria-hidden="true">{expanded ? "⌄" : "⌃"}</span>
+          </button>
+        )}
+        {receivedFiles.length === 0 ? <p className="min-w-0 flex-1 py-1 text-xs text-stone-400">No received files yet</p> : (
+          <ul id="received-file-list" aria-label="Received file list" className={`min-w-0 flex-1 overflow-y-auto ${expanded ? "max-h-[min(40vh,24rem)]" : "max-h-32"}`}>
             {receivedFiles.map((file) => (
-              <li key={file.id} className="flex min-h-10 items-center gap-2 border-t border-stone-100 py-1">
-                <span className="min-w-0 flex-1 truncate text-sm" title={file.name}>{file.name}</span>
-                <a href={file.objectUrl} download={downloadName(file.name)} className={button} aria-label={`Download ${file.name}`}>Download</a>
+              <li key={file.id} className="flex h-8 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-xs text-stone-200" title={file.name}>{file.name}</span>
+                <a href={file.objectUrl} download={downloadName(file.name)} className="shrink-0 rounded border border-stone-600 px-2 py-1 text-[11px] text-stone-100 hover:bg-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" aria-label={`Download ${file.name}`}>Download</a>
               </li>
             ))}
           </ul>
         )}
-        {receivedFiles.length > 1 && <p className="mt-1 text-xs text-stone-500">Your browser may ask permission to download multiple files.</p>}
+        {receivedFiles.length > 1 && <button className={button} onClick={() => downloadAll(receivedFiles)}>Download all</button>}
       </section>
     </div>
   );

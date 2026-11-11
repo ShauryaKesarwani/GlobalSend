@@ -448,7 +448,7 @@ export default function TransferTestPage() {
     : "";
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f0e3c2,transparent_40%),linear-gradient(180deg,#f6f3eb_0%,#ddd2bb_100%)] px-4 pt-8 pb-[32rem] text-stone-900 sm:px-6 lg:pb-72">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f0e3c2,transparent_40%),linear-gradient(180deg,#f6f3eb_0%,#ddd2bb_100%)] px-4 pt-8 pb-72 text-stone-900 sm:px-6 lg:pb-48">
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="rounded-4xl border border-stone-300/80 bg-white/80 p-6 shadow-[0_20px_70px_rgba(58,41,19,0.14)] backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-stone-200 pb-5">
@@ -659,4 +659,3 @@ export default function TransferTestPage() {
     </main>
   );
 }
-
