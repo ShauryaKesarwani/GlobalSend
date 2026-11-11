@@ -43,6 +43,7 @@ type ReceivedFile = {
   mimeType: string;
   size: number;
   objectUrl: string;
+  cleanup?: () => Promise<void>;
 };
 
 type ChannelMessage = { from: string; text: string };
@@ -275,6 +276,9 @@ export default function TransferTestPage() {
             : `Saved ${file.name} from ${peerId} to disk`,
         );
       },
+      onFileError: (_peerId, name) => {
+        setError(`Could not store ${name}. Check available storage and retry the transfer.`);
+      },
       onLog: addLog,
       onReconnecting: (attempt) => {
         addLog(`WS disconnected — reconnecting (attempt ${attempt})...`);
@@ -291,6 +295,7 @@ export default function TransferTestPage() {
       client.dispose();
       for (const file of receivedFilesRef.current) {
         URL.revokeObjectURL(file.objectUrl);
+        void file.cleanup?.();
       }
     };
   }, []);
@@ -654,5 +659,4 @@ export default function TransferTestPage() {
     </main>
   );
 }
-
 

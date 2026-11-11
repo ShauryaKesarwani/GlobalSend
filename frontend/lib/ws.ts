@@ -3,6 +3,7 @@ import {
   PeerConnectionManager,
 } from "@/webrtc/PeerConnectionManager";
 import { transferShardCount, wsUrl } from "@/src/config";
+import { openReceiveSink, type ReceiveSink } from "@/lib/receiveStorage";
 
 type Peer = { id: string; alias: string };
 
@@ -19,19 +20,23 @@ type FileTransferRecord = {
   size: number;
   objectUrl: string;
   from: string;
+  cleanup?: () => Promise<void>;
 };
 
 type IncomingTransfer = {
   meta: FileManifest;
   buffers: ArrayBuffer[];
+  batch: ArrayBuffer[];
+  batchBytes: number;
   pendingChunks: Map<number, ArrayBuffer>;
   nextChunkIndex: number;
   receivedChunks: number;
   receivedBytes: number;
   completedShards: Set<number>;
-  sink: FileSystemWritableFileStream | null;
-  sinkReady: Promise<FileSystemWritableFileStream | null>;
+  sinkReady: Promise<ReceiveSink | null>;
   writeChain: Promise<void>;
+  cancelled: boolean;
+  completing: boolean;
 };
 
 type Handlers = {
@@ -64,6 +69,7 @@ type Handlers = {
     },
   ) => void;
   onFileComplete: (peerId: string, file: FileTransferRecord) => void;
+  onFileError?: (peerId: string, name: string) => void;
   onLog: (msg: string) => void;
   onReconnecting?: (attempt: number) => void;
   onReconnected?: () => void;
@@ -72,6 +78,8 @@ type Handlers = {
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_MAX_MS = 30000;
 const MAX_READ_AHEAD = 8;
+const DISK_STAGING_THRESHOLD = 32 * 1024 * 1024;
+const DISK_WRITE_BATCH_SIZE = 4 * 1024 * 1024;
 
 export class PeerConnectionGroup {
   private shards = new Map<number, PeerConnectionManager>();
@@ -96,7 +104,9 @@ export class PeerConnectionGroup {
     size: number;
     blob?: Blob;
     savedToDisk: boolean;
+    cleanup?: () => Promise<void>;
   }) => void;
+  onFileError?: (name: string) => void;
   onLog?: (message: string) => void;
 
   constructor(
@@ -226,6 +236,10 @@ export class PeerConnectionGroup {
     this.closed = true;
     for (const shard of this.shards.values()) shard.close();
     this.shards.clear();
+    for (const transfer of this.incomingTransfers.values()) {
+      transfer.cancelled = true;
+      void transfer.writeChain.catch(() => {}).then(async () => (await transfer.sinkReady)?.discard());
+    }
     this.incomingTransfers.clear();
     this.shardTransfers.clear();
   }
@@ -274,14 +288,17 @@ export class PeerConnectionGroup {
     this.incomingTransfers.set(meta.id, {
       meta,
       buffers: [],
+      batch: [],
+      batchBytes: 0,
       pendingChunks: new Map(),
       nextChunkIndex: 0,
       receivedChunks: 0,
       receivedBytes: 0,
       completedShards: new Set(),
-      sink: null,
       sinkReady: this.openFileSink(meta),
       writeChain: Promise.resolve(),
+      cancelled: false,
+      completing: false,
     });
     this.onFileStart?.(meta);
   }
@@ -308,16 +325,28 @@ export class PeerConnectionGroup {
       const data = transfer.pendingChunks.get(transfer.nextChunkIndex)!;
       transfer.pendingChunks.delete(transfer.nextChunkIndex);
       transfer.nextChunkIndex += 1;
-      transfer.writeChain = transfer.writeChain.then(async () => {
+      transfer.batch.push(data);
+      transfer.batchBytes += data.byteLength;
+      if (transfer.batchBytes >= DISK_WRITE_BATCH_SIZE) this.flushIncomingBatch(transfer);
+    }
+  }
+
+  private flushIncomingBatch(transfer: IncomingTransfer) {
+    if (!transfer.batch.length) return;
+    const batch = transfer.batch;
+    transfer.batch = [];
+    transfer.batchBytes = 0;
+    transfer.writeChain = transfer.writeChain.then(async () => {
+        if (transfer.cancelled) return;
         const sink = await transfer.sinkReady;
         if (sink) {
-          await sink.write(new Uint8Array(data));
-          transfer.sink = sink;
+          await sink.write(new Blob(batch));
         } else {
-          transfer.buffers.push(data);
+          transfer.buffers.push(...batch);
         }
-      });
-    }
+    });
+    // Observe failures immediately even if the sender never finishes the transfer.
+    void transfer.writeChain.catch((error) => this.failIncoming(transfer, error));
   }
 
   private handleFileComplete(shardId: number, transferId: string) {
@@ -337,53 +366,56 @@ export class PeerConnectionGroup {
       return;
     }
 
-    this.incomingTransfers.delete(transfer.meta.id);
+    // Prevent duplicate completion while asynchronous disk writes are finishing.
+    if (transfer.cancelled || transfer.completing) return;
+    transfer.completing = true;
+    this.flushIncomingBatch(transfer);
     void (async () => {
-      await transfer.writeChain;
-      const sink = await transfer.sinkReady;
-      if (sink) await sink.close();
-      const blob = sink
-        ? undefined
-        : new Blob(transfer.buffers, {
+      try {
+        await transfer.writeChain;
+        const sink = await transfer.sinkReady;
+        if (transfer.cancelled) return;
+        const blob = sink ? await sink.finish() : new Blob(transfer.buffers, {
             type: transfer.meta.mimeType || "application/octet-stream",
           });
-      if (transfer.receivedBytes !== transfer.meta.size) {
-        this.onLog?.(
-          `Transfer ${transfer.meta.name} ended with ${transfer.receivedBytes}/${transfer.meta.size} bytes`,
-        );
+        if (transfer.cancelled) { await sink?.discard(); return; }
+        if (transfer.receivedBytes !== transfer.meta.size) {
+          this.onLog?.(
+            `Transfer ${transfer.meta.name} ended with ${transfer.receivedBytes}/${transfer.meta.size} bytes`,
+          );
+        }
+        this.onFileComplete?.({
+          id: transfer.meta.id,
+          name: transfer.meta.name,
+          mimeType: transfer.meta.mimeType,
+          size: transfer.receivedBytes,
+          blob,
+          savedToDisk: false,
+          cleanup: sink ? () => sink.discard() : undefined,
+        });
+      } catch (error) {
+        this.failIncoming(transfer, error);
+      } finally {
+        this.incomingTransfers.delete(transfer.meta.id);
       }
-      this.onFileComplete?.({
-        id: transfer.meta.id,
-        name: transfer.meta.name,
-        mimeType: transfer.meta.mimeType,
-        size: transfer.receivedBytes,
-        blob,
-        savedToDisk: Boolean(sink),
-      });
     })();
   }
 
-  private async openFileSink(meta: FileManifest) {
-    if (!("showSaveFilePicker" in window)) return null;
+  private failIncoming(transfer: IncomingTransfer, error: unknown) {
+    if (transfer.cancelled) return;
+    transfer.cancelled = true;
+    this.incomingTransfers.delete(transfer.meta.id);
+    transfer.pendingChunks.clear();
+    transfer.batch.length = 0;
+    transfer.buffers.length = 0;
+    void transfer.sinkReady.then((sink) => sink?.discard()).catch(() => {});
+    this.onLog?.(`Could not store ${transfer.meta.name}: ${String(error)}`);
+    this.onFileError?.(transfer.meta.name);
+  }
 
-    try {
-      const picker = (window as Window & {
-        showSaveFilePicker?: (options?: object) => Promise<{
-          createWritable: () => Promise<FileSystemWritableFileStream>;
-        }>;
-      }).showSaveFilePicker;
-      if (!picker) return null;
-      const handle = await picker({
-        suggestedName: meta.name,
-        types: [{
-          description: meta.mimeType || "File",
-          accept: { [meta.mimeType || "application/octet-stream"]: [".bin"] },
-        }],
-      });
-      return await handle.createWritable();
-    } catch {
-      return null;
-    }
+  private async openFileSink(meta: FileManifest) {
+    if (meta.size < DISK_STAGING_THRESHOLD) return null;
+    return openReceiveSink(meta.size);
   }
 }
 
@@ -623,8 +655,10 @@ export class WSClient {
         size: file.size,
         objectUrl,
         from: remotePeerId,
+        cleanup: file.cleanup,
       });
     };
+    group.onFileError = (name) => this.handlers.onFileError?.(remotePeerId, name);
     group.onLog = (message) => this.log(message);
     this.peers.set(remotePeerId, group);
     return group;

@@ -24,6 +24,10 @@ Shared files are temporarily stored in the browser's local IndexedDB and removed
 
 The separate photos/videos picker requests media types only, allowing supported Android browsers to use the system photo picker, including configured cloud photo providers. The exact picker is controlled by the browser and device. iOS does not support receiving shares into a PWA; use either in-app picker there instead. A native iOS app with a share extension would be needed for share-sheet integration.
 
+## Receiving files
+
+Files smaller than 32 MiB are held in memory. On browsers that support the origin private file system (normally over HTTPS), larger incoming files are staged in the site's private disk storage in 4 MiB batches and offered as downloads when complete. Incoming chunks do not wait for disk writes, so memory usage can grow when receiving faster than storage can keep up. If disk staging cannot be initialized, files are held in memory instead. A storage failure during a transfer is reported and the file must be sent again. Browser storage quotas apply. Temporary files are removed on normal page cleanup, but an abrupt browser exit can leave cached files behind; clearing the site's storage removes them.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
