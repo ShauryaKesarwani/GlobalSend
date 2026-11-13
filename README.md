@@ -9,7 +9,7 @@ No installs. No accounts. No files touching a server. Just open a tab, pick a pe
 <br />
 
 [![Status](https://img.shields.io/badge/status-active%20development-f59e0b?style=for-the-badge)](#-roadmap)
-[![License](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](#-license)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-22c55e?style=for-the-badge)](#-license)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-6366f1?style=for-the-badge)](#-contributing)
 
 <br />

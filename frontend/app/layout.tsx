@@ -54,7 +54,8 @@ export default function RootLayout({
         {children}
         <Toaster position="top-center" />
       </body>
-      <GoogleAnalytics gaId="G-B5PK9PMVZB" />
+      {/* Disabled in the native app build (build:tauri), which must work offline. */}
+      {process.env.NEXT_PUBLIC_ENABLE_ANALYTICS !== "false" && <GoogleAnalytics gaId="G-B5PK9PMVZB" />}
     </html>
   );
 }

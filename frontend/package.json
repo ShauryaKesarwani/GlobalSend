@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:tauri": "next dev -H 0.0.0.0",
+    "build:tauri": "TAURI_BUILD=1 NEXT_PUBLIC_ENABLE_ANALYTICS=false next build"
   },
   "dependencies": {
     "@next/third-parties": "^16.2.12",

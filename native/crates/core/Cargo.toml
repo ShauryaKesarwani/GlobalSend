@@ -1,0 +1,11 @@
+[package]
+name = "globalsend-core"
+description = "Platform-independent GlobalSend engine: device identity, LAN discovery and transfers. Shared by the Tauri app and the future CLI/TUI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
