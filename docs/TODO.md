@@ -45,6 +45,32 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 - [ ] **Human-readable aliases** — plan wants `adjective-animal-###`; code uses `user-xxx` (`page.tsx:45`).
 - [ ] **Rooms / contacts** model and transfer history.
 
+## 📱 Native app — Tauri v2 (desktop + mobile)
+
+> Goal: one app for Windows/macOS/Linux/Android/iOS with the same UI as the website. Features light up only where the device supports them (e.g. NFC on phones). Heavy work (discovery, transfers, background) lives in a Rust core; the webview only renders UI and receives progress.
+
+### Architecture
+- [ ] 🔴 **Monorepo restructure** (Bun workspaces) — `apps/web` (Next.js), `apps/native` (Tauri), `apps/server` (signaling), `packages/ui`, `packages/core`, `packages/platform`. Removes the duplicated `PeerConnectionManager.ts` / message types between frontend and backend.
+- [ ] 🔴 **Shared UI package** — React + Tailwind components used by both the website and the app so they stay visually identical.
+- [ ] 🔴 **Platform capability interface** — `platform.nfc?`, `platform.scanQr?`, `platform.saveFile`, `platform.onSharedFiles?` with web + Tauri implementations; UI checks availability instead of having separate apps.
+- [ ] 🔴 **Rust transfer core** — discovery, transfers and background work in Rust; file bytes stream network → disk and never pass through the webview/IPC (keeps RAM flat regardless of file size).
+- [ ] 🔴 **Offline-first** — UI, icons and fonts bundled in the app and loading instantly with no internet; LAN transfers work without the signaling server; degrade gracefully when the WebSocket can't be reached.
+- [ ] 🟡 **Written protocol spec** — single source of truth for the TS (web) and Rust (app) engines so app ↔ website transfers interoperate.
+
+### Transfer features
+- [ ] 🔴 **LAN discovery + transfer, LocalSend-compatible** — UDP multicast discovery + HTTPS transfer per the LocalSend protocol, so GlobalSend devices appear in other users' LocalSend and vice versa. Android needs a `MulticastLock` (small Kotlin plugin); iOS needs the Local Network permission + Apple's multicast entitlement.
+- [ ] 🔴 **Background transfers on app switch** — Android foreground service / user-initiated data transfer job. iOS: not possible for P2P (~30 s grace only) — document the limit.
+- [ ] 🔴 **Transfer progress in notification** — Android foreground-service notification with progress; iOS Live Activity (optional, only while the app may run).
+- [ ] 🟡 **Internet transfers with website users** — WebRTC in Rust (`webrtc-rs`) speaking the same signaling/protocol as the web app.
+- [ ] 🟡 **NFC tap to connect** — tap exchanges pairing info only, data goes over Wi-Fi. Android ↔ Android via HCE (one phone emulates a tag, custom Kotlin plugin) + reader (official `plugin-nfc`). iPhone can read only. QR stays the fallback.
+- [ ] 🟡 **Quick Share interop (experimental, desktop)** — integrate `rqs_lib` from rquickshare (GPL-3.0, compatible with our AGPL-3.0), pinned to a commit, so PCs appear in Android's Quick Share. Limits: same Wi-Fi only, Samsung unreliable, may break on Google protocol changes. Android app: use the system share sheet (already includes Quick Share). iOS: not possible.
+- [ ] 🟡 **Receive files shared from other apps** — native share intent / share extension (replaces the PWA `share_target`).
+- [ ] 🟡 **Save received files to a user-visible location** — Tauri `fs` plugin instead of OPFS.
+
+### Later
+- [ ] 🟢 **CLI / TUI** — second binary (`globalsend-cli`, `ratatui` for TUI) shipped in the desktop installer, sharing the Rust core.
+- [ ] 🐛 **Linux desktop webview** — WebKitGTK has weak WebRTC support; rely on the Rust engine there.
+
 ## 🟢 Project hygiene
 
 - [ ] **Add a `LICENSE` file** — README advertises MIT but no license file exists.
