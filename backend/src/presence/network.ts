@@ -43,13 +43,20 @@ function expandIPv6(address: string): string[] {
 }
 
 /**
- * Client address for a request. Behind a reverse proxy (nginx, Cloudflare) set
- * TRUST_PROXY=1 so the forwarded address is used instead of the proxy's.
+ * Client address for a request.
+ *
+ * - TRUST_PROXY unset: the socket address (clients connect to Bun directly).
+ * - TRUST_PROXY=1: behind one reverse proxy such as Caddy or nginx. Uses the
+ *   last X-Forwarded-For entry, which the proxy itself appended; earlier entries
+ *   come from the client and can be forged.
+ * - TRUST_PROXY=cloudflare: behind Cloudflare. Uses cf-connecting-ip.
  */
 export function clientIp(headers: Headers, socketIp: string | undefined): string | undefined {
-  if (process.env.TRUST_PROXY === "1") {
-    const forwarded = headers.get("cf-connecting-ip") ?? headers.get("x-forwarded-for")?.split(",")[0];
-    if (forwarded?.trim()) return forwarded.trim();
+  const mode = process.env.TRUST_PROXY;
+  if (mode === "cloudflare") return headers.get("cf-connecting-ip")?.trim() || socketIp;
+  if (mode === "1") {
+    const last = headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+    return last || socketIp;
   }
   return socketIp;
 }

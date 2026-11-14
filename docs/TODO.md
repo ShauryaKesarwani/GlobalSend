@@ -72,7 +72,7 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
   - [ ] 🔴 Test on two real phones + a PC on the same Wi-Fi (Windows asks for firewall access on first launch — allow private networks).
   - [ ] 🟡 Encrypt LAN traffic: HTTPS with self-signed certs pinned via the announcement (currently plain HTTP).
   - [x] **Browser "Nearby"** — browsers can't multicast or run a server, so the signaling server marks peers on the same network (public IPv4 / IPv6 /64, never sent to clients) with `nearby: true`; the page shows a Nearby badge and lists them first, and WebRTC connects them directly over the LAN. Needs internet. `backend/src/presence/network.ts`.
-  - [ ] 🔴 Production: set `NODE_ENV=production` and (behind nginx/Cloudflare) `TRUST_PROXY=1` on the backend — see `backend/.env.example`. Set `NEXT_PUBLIC_SITE_URL` for the app build — see `frontend/.env.example`.
+  - [ ] 🔴 Production: set `NODE_ENV=production` and `TRUST_PROXY=1` (Caddy on the Oracle VPS) on the backend — see `backend/.env.example`. Set `NEXT_PUBLIC_SITE_URL` for the app build — see `frontend/.env.example`.
   - Browser limits (by design, not fixing): needs internet to reach the signaling server; two tabs on one PC with Wi-Fi off can't connect (browsers never use loopback for WebRTC). Use the native app for offline LAN.
   - [ ] 🟢 Offline browser LAN (Snapdrop-style): the native app could serve the web UI + signaling on the LAN so browsers on the same Wi-Fi work without internet.
   - [ ] 🟡 iOS: Local Network usage string + multicast entitlement request to Apple.

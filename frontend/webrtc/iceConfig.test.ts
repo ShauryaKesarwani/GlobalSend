@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { FALLBACK_ICE, fetchIceConfig, resetIceCache } from "./iceConfig";
+import { FALLBACK_ICE, fetchIceConfig, resetIceCache, withStun } from "./iceConfig";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -14,7 +14,7 @@ test("shares one TURN lookup between shards", async () => {
     return Response.json(String(url).endsWith("/session") ? { token: "t" } : { iceServers: [{ urls: "turn:x" }], ttl: 60 });
   }) as typeof fetch;
   const configs = await Promise.all([fetchIceConfig(), fetchIceConfig(), fetchIceConfig()]);
-  expect(configs[0].iceServers).toEqual([{ urls: "turn:x" }]);
+  expect(configs[0].iceServers).toEqual([...FALLBACK_ICE.iceServers, { urls: "turn:x" }]);
   expect(calls).toBe(2); // one session + one ice-servers request in total
 });
 
@@ -31,4 +31,11 @@ test("gives up on a hanging backend instead of blocking the connection", async (
   const started = Date.now();
   expect(await fetchIceConfig()).toEqual(FALLBACK_ICE);
   expect(Date.now() - started).toBeLessThan(4500);
+});
+
+test("adds STUN next to TURN-only lists, keeps lists that already have STUN", () => {
+  const turnOnly = { iceServers: [{ urls: ["turn:a", "turns:b"] }], ttl: 60 };
+  expect(withStun(turnOnly).iceServers).toEqual([...FALLBACK_ICE.iceServers, { urls: ["turn:a", "turns:b"] }]);
+  const mixed = { iceServers: [{ urls: ["stun:s", "turn:a"] }], ttl: 60 };
+  expect(withStun(mixed)).toBe(mixed);
 });

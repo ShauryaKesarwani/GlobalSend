@@ -31,9 +31,12 @@ test("in production, private addresses (an untrusted proxy) are never nearby", (
   expect(networkKey("203.0.113.7")).toBe("v4:203.0.113.7");
 });
 
-test("forwarded headers are only trusted when TRUST_PROXY=1", () => {
-  const headers = new Headers({ "x-forwarded-for": "198.51.100.4, 10.0.0.1" });
+test("forwarded headers are only trusted when TRUST_PROXY is set", () => {
+  const headers = new Headers({ "x-forwarded-for": "6.6.6.6, 198.51.100.4", "cf-connecting-ip": "6.6.6.6" });
   expect(clientIp(headers, "127.0.0.1")).toBe("127.0.0.1");
+  // Behind Caddy/nginx: the proxy appends the real address last; earlier entries are client-supplied.
   process.env.TRUST_PROXY = "1";
   expect(clientIp(headers, "127.0.0.1")).toBe("198.51.100.4");
+  process.env.TRUST_PROXY = "cloudflare";
+  expect(clientIp(headers, "127.0.0.1")).toBe("6.6.6.6");
 });

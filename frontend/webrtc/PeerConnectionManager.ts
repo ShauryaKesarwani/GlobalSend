@@ -1,4 +1,4 @@
-import { fetchIceConfig, fetchTurnConfig } from "./iceConfig";
+import { fetchIceConfig, fetchTurnConfig, withStun } from "./iceConfig";
 
 const CONTROL_PREFIX = "__rift_ctrl__";
 const CHUNK_SIZE = 64 * 1024;
@@ -163,7 +163,7 @@ export class PeerConnectionManager {
   private scheduleRefresh(ttl: number, generation: number) {
     this.refreshTimer = setTimeout(async () => {
       try {
-        const config = await fetchTurnConfig();
+        const config = withStun(await fetchTurnConfig());
         if (generation !== this.generation || !this.pc) return;
         this.pc.setConfiguration({ ...this.pc.getConfiguration(), iceServers: config.iceServers });
         this.scheduleRefresh(config.ttl, generation);

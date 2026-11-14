@@ -164,7 +164,7 @@ Registers presence and requests the current peer list. Sent right after the sock
 
 **Effects:** upserts `peers[id] = { alias, lastSeen: now, network }`; sends `peer_joined` to every client; replies to the sender with `peer_list`.
 
-`network` is an opaque same-network key derived from the client's address (public IPv4, or the IPv6 /64; see `presence/network.ts`). It is never sent to clients; instead every peer entry carries `nearby: true` when that peer is on the **recipient's** network. Behind a reverse proxy set `TRUST_PROXY=1` so `cf-connecting-ip` / `x-forwarded-for` is used. In production, private/loopback addresses never count as nearby.
+`network` is an opaque same-network key derived from the client's address (public IPv4, or the IPv6 /64; see `presence/network.ts`). It is never sent to clients; instead every peer entry carries `nearby: true` when that peer is on the **recipient's** network. Behind one reverse proxy (Caddy, nginx) set `TRUST_PROXY=1` (uses the last `x-forwarded-for` entry, which the proxy appends); behind Cloudflare set `TRUST_PROXY=cloudflare` (uses `cf-connecting-ip`). In production, private/loopback addresses never count as nearby.
 
 #### `heartbeat`
 

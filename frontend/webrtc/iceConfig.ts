@@ -28,7 +28,7 @@ export function fetchIceConfig(): Promise<IceConfig> {
       .then(
         (config) => {
           entry.expires = Date.now() + config.ttl * 800; // refresh before credentials expire
-          return config;
+          return withStun(config);
         },
         () => FALLBACK_ICE,
       )
@@ -36,6 +36,17 @@ export function fetchIceConfig(): Promise<IceConfig> {
   };
   cached = entry;
   return entry.config;
+}
+
+/**
+ * Makes sure a STUN server is always listed next to TURN. ICE prefers direct and
+ * STUN paths and only relays through TURN when those fail, so this keeps
+ * TURN (limited free tier) as a last resort.
+ */
+export function withStun(config: IceConfig): IceConfig {
+  const urls = config.iceServers.flatMap((server) => (Array.isArray(server.urls) ? server.urls : [server.urls]));
+  if (urls.some((url) => url.startsWith("stun:") || url.startsWith("stuns:"))) return config;
+  return { ...config, iceServers: [...FALLBACK_ICE.iceServers, ...config.iceServers] };
 }
 
 /** Test hook. */

@@ -225,7 +225,7 @@ cp frontend/.env.example frontend/.env.local   # NEXT_PUBLIC_API_URL=http://loca
 cp backend/.env.example backend/.env           # leave NODE_ENV / TRUST_PROXY unset for local dev
 ```
 
-For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). TURN credentials come from the backend (`CLOUDFLARE_TURN_KEY_*`), not from frontend variables. Behind a reverse proxy, set `TRUST_PROXY=1` on the backend so "Nearby" peers are detected correctly.
+For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). TURN credentials come from the backend (`CLOUDFLARE_TURN_KEY_*`), not from frontend variables. Behind a reverse proxy like Caddy, set `TRUST_PROXY=1` on the backend (`cloudflare` behind Cloudflare) so "Nearby" peers are detected correctly.
 
 > ⚠️ **Note:** STUN cannot bypass a firewall that blocks peer traffic. For college or corporate Wi-Fi a TURN relay is needed. `NEXT_PUBLIC_TRANSFER_SHARDS` controls parallel PeerConnections and defaults to 3.
 
