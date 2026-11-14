@@ -216,35 +216,18 @@ bun run dev
 
 Open the app, head to **`/test`**, and you'll get a session alias and a QR code. Open a second tab (or scan the QR from another device) to see the peer appear — then send a file.
 
-### 4. Configure the frontend
+### 4. Configure the frontend and backend
 
-Create `frontend/.env.local`:
+Copy the samples and fill them in. Each variable is explained in the sample.
 
 ```sh
-# Where the signaling backend lives (ws:// is derived automatically)
-NEXT_PUBLIC_API_URL=http://localhost:4000
-
-# Optional
-NEXT_PUBLIC_APP_ENV=development
-NEXT_PUBLIC_ENABLE_ANALYTICS=false
-
-# Optional. Comma-separated STUN URLs.
-NEXT_PUBLIC_STUN_URLS=stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478
-
-# Optional self-hosted coturn. Keep these values in .env.local, not in git.
-# Include TCP/TLS on port 443 for restrictive networks such as college Wi-Fi.
-NEXT_PUBLIC_TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp
-NEXT_PUBLIC_TURN_USERNAME=globalsend
-NEXT_PUBLIC_TURN_CREDENTIAL=replace-me
-
-# Optional tuning.
-NEXT_PUBLIC_ICE_TRANSPORT_POLICY=all
-NEXT_PUBLIC_TRANSFER_SHARDS=3
+cp frontend/.env.example frontend/.env.local   # NEXT_PUBLIC_API_URL=http://localhost:4000 for local dev
+cp backend/.env.example backend/.env           # leave NODE_ENV / TRUST_PROXY unset for local dev
 ```
 
-For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). Deploy the frontend anywhere that runs Next.js and the backend on any Bun‑friendly host (Fly, Railway, Render, a VPS…).
+For a real deployment, point `NEXT_PUBLIC_API_URL` at your hosted backend (the frontend rewrites `http`→`ws` for the socket). TURN credentials come from the backend (`CLOUDFLARE_TURN_KEY_*`), not from frontend variables. Behind a reverse proxy, set `TRUST_PROXY=1` on the backend so "Nearby" peers are detected correctly.
 
-> ⚠️ **Note:** STUN cannot bypass a firewall that blocks peer traffic. For college or corporate Wi-Fi, use a coturn server with `turns:` on TCP 443, a valid TLS certificate, and a configured relay port range. Direct connections remain preferred when `NEXT_PUBLIC_ICE_TRANSPORT_POLICY=all`; TURN is used when needed. `NEXT_PUBLIC_TRANSFER_SHARDS` controls parallel PeerConnections and defaults to 3.
+> ⚠️ **Note:** STUN cannot bypass a firewall that blocks peer traffic. For college or corporate Wi-Fi a TURN relay is needed. `NEXT_PUBLIC_TRANSFER_SHARDS` controls parallel PeerConnections and defaults to 3.
 
 ---
 

@@ -1,0 +1,18 @@
+[package]
+name = "tauri-plugin-gs-nfc"
+description = "GlobalSend NFC tap-to-connect (Android HCE + reader mode) and Wi-Fi multicast lock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+# Required so the app's build script can locate this plugin's Android project.
+links = "tauri-plugin-gs-nfc"
+
+[dependencies]
+tauri = { version = "2.12.5" }
+serde.workspace = true
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2.7.2", features = ["build"] }

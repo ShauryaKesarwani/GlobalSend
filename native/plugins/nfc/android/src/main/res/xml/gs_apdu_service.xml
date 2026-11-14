@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only answers while the phone is unlocked, so a locked phone can't be pushed files. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/gs_hce_description"
+    android:requireDeviceUnlock="true">
+    <aid-group
+        android:category="other"
+        android:description="@string/gs_hce_description">
+        <!-- Proprietary AID: F0 + "GLSEND" + version 01. Must match NfcPlugin.AID. -->
+        <aid-filter android:name="F0474C53454E4401" />
+        <!-- Standard NDEF Type 4 Tag application: one-time website link for
+             Web NFC and phones without the app. -->
+        <aid-filter android:name="D2760000850101" />
+    </aid-group>
+</host-apdu-service>

@@ -4,3 +4,6 @@
 //! the desktop + mobile app and the future CLI/TUI binaries.
 
 pub mod device;
+pub mod lan;
+pub mod settings;
+pub mod tap;

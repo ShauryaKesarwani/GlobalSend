@@ -42,6 +42,8 @@ export const messageSchema = z.discriminatedUnion("type", [
         mimeType: z.string(),
       })
       .optional(),
+    // Single-use NFC tap token from the receiver's phone; lets it auto-accept.
+    nfcToken: z.string().max(256).optional(),
   }),
 
   z.object({

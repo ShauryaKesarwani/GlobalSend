@@ -4,8 +4,10 @@ import {
 } from "@/webrtc/PeerConnectionManager";
 import { transferShardCount, wsUrl } from "@/src/config";
 import { openReceiveSink, type ReceiveSink } from "@/lib/receiveStorage";
+import { fetchIceConfig } from "@/webrtc/iceConfig";
 
-type Peer = { id: string; alias: string };
+/** `nearby`: same network as us (per the signaling server), so WebRTC goes direct over LAN. */
+type Peer = { id: string; alias: string; nearby?: boolean };
 
 type TransferFile = {
   name: string;
@@ -43,7 +45,7 @@ type Handlers = {
   onPeerList: (peers: Peer[]) => void;
   onPeerJoined: (peer: Peer) => void;
   onPeerLeft: (peerId: string) => void;
-  onTransferInvite: (from: string, file?: TransferFile) => void;
+  onTransferInvite: (from: string, file?: TransferFile, nfcToken?: string) => void;
   onTransferAccepted: (from: string) => void;
   onTransferDeclined: (from: string) => void;
   onDataChannelOpen: (peerId: string) => void;
@@ -451,6 +453,8 @@ export class WSClient {
     this.handlers = handlers;
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.connect();
+    // Warm the shared ICE lookup so the first connection doesn't wait for it.
+    void fetchIceConfig();
   }
 
   private connect() {
@@ -533,7 +537,7 @@ export class WSClient {
           this.sendTransferAccept(msg.from);
           break;
         }
-        this.handlers.onTransferInvite(msg.from, msg.file);
+        this.handlers.onTransferInvite(msg.from, msg.file, typeof msg.nfcToken === "string" ? msg.nfcToken : undefined);
         break;
       case "transfer-accept":
         this.log(`Transfer accepted by ${msg.from} - starting WebRTC shards`);
@@ -555,9 +559,9 @@ export class WSClient {
     }
   }
 
-  public sendTransferInvite(to: string, file?: TransferFile) {
-    this.log(`-> transfer-invite to ${to}`);
-    this.safeSend({ type: "transfer-invite", to, file });
+  public sendTransferInvite(to: string, file?: TransferFile, nfcToken?: string) {
+    this.log(`-> transfer-invite to ${to}${nfcToken ? " (NFC tap)" : ""}`);
+    this.safeSend({ type: "transfer-invite", to, file, nfcToken });
   }
 
   public sendTransferAccept(to: string) {

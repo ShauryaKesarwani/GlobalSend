@@ -3,6 +3,9 @@ export const env = {
   env: process.env.NEXT_PUBLIC_APP_ENV || "development",
   isProduction: process.env.NEXT_PUBLIC_APP_ENV === "production",
   enableAnalytics: process.env.NEXT_PUBLIC_ENABLE_ANALYTICS === "true",
+  /** Public website origin. The native app puts it in its NFC tag so browsers
+   * and phones without the app can tap to connect. */
+  siteUrl: process.env.NEXT_PUBLIC_SITE_URL || "",
 } as const;
 
 export const wsUrl = env.apiUrl.replace(/^http/, "ws");

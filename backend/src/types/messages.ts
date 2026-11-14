@@ -45,7 +45,9 @@ export type TransferFile = {
 export type TransferInviteMessage = {
   type: "transfer-invite";
   to: string;
-  file: TransferFile;
+  file?: TransferFile;
+  /** Single-use NFC tap token issued by the receiver's phone; a valid one skips the prompt. */
+  nfcToken?: string;
 };
 
 export type TransferAcceptMessage = {

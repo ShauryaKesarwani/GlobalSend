@@ -7,8 +7,8 @@
   "build": {
     "frontendDist": "../../frontend/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "bun --cwd ../frontend run dev:tauri",
-    "beforeBuildCommand": "bun --cwd ../frontend run build:tauri"
+    "beforeDevCommand": "bun run --cwd ../frontend dev:tauri",
+    "beforeBuildCommand": "bun run --cwd ../frontend build:tauri"
   },
   "app": {
     "windows": [

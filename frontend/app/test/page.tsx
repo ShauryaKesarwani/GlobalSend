@@ -2,17 +2,22 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { NativePanel } from "@/components/NativePanel";
 import { PeerQrCode } from "@/components/PeerQrCode";
 import { TransferDock } from "@/components/TransferDock";
 import {
+  getConnectNfcToken,
   getConnectPeerAlias,
   getConnectPeerId,
 } from "@/lib/peerDeepLink";
+import { isWebNfcSupported, scanForConnectLink } from "@/lib/webNfc";
 import { WSClient } from "@/lib/ws";
 import { messageUrl } from "@/lib/messageUrl";
 import { takeSharedFiles } from "@/lib/sharedFiles";
+import { native, type LanPeer, type TapResult } from "@/lib/native";
+import { isNativeApp } from "@/lib/platform";
 
-type Peer = { id: string; alias: string };
+type Peer = { id: string; alias: string; nearby?: boolean };
 type IncomingInvite = {
   from: string;
   file?: { name: string; size: number; mimeType: string };
@@ -62,6 +67,7 @@ const ALIAS = `user-${Math.random().toString(36).slice(2, 5)}`;
 const subscribeToLocationSearch = () => () => undefined;
 const getBrowserLocationSearch = () => window.location.search;
 const getServerLocationSearch = () => "";
+const getServerIsNative = () => false;
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -113,6 +119,15 @@ export default function TransferTestPage() {
   );
   const connectPeerId = getConnectPeerId(new URLSearchParams(locationSearch));
   const connectPeerAlias = getConnectPeerAlias(new URLSearchParams(locationSearch));
+  // Set when the page was opened from a phone's NFC tag (lets that phone auto-accept).
+  const connectNfcToken = getConnectNfcToken(new URLSearchParams(locationSearch));
+  const nativeApp = useSyncExternalStore(subscribeToLocationSearch, isNativeApp, getServerIsNative);
+  const webNfc = useSyncExternalStore(subscribeToLocationSearch, isWebNfcSupported, getServerIsNative);
+  const [nfcScanning, setNfcScanning] = useState(false);
+  const nfcAbortRef = useRef<AbortController | null>(null);
+  const peersRef = useRef<Peer[]>([]);
+  // Signaling ids of peers also reachable over LAN; the native app lists those under "Nearby".
+  const [lanSignalingIds, setLanSignalingIds] = useState<Set<string>>(new Set());
 
   const [peers, setPeers] = useState<Peer[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
@@ -225,6 +240,12 @@ export default function TransferTestPage() {
   }, [connectPeerId]);
 
   useEffect(() => {
+    peersRef.current = peers;
+  }, [peers]);
+
+  useEffect(() => () => nfcAbortRef.current?.abort(), []);
+
+  useEffect(() => {
     const client = new WSClient(SESSION_ID, ALIAS, {
       onPeerList: (list) => setPeers(list.filter((peer) => peer.id !== SESSION_ID)),
       onPeerJoined: (peer) => {
@@ -236,7 +257,18 @@ export default function TransferTestPage() {
         setConnectedPeers((prev) => prev.filter((id) => id !== peerId));
         setTransferProgress((prev) => prev.filter((item) => item.peerId !== peerId));
       },
-      onTransferInvite: (from, file) => {
+      onTransferInvite: (from, file, nfcToken) => {
+        if (nfcToken && isNativeApp()) {
+          // The sender tapped our phone: accept without asking if the token is ours and fresh.
+          void native.verifyTapToken(nfcToken).then((valid) => {
+            if (!valid) return setInvite({ from, file });
+            selectedPeerRef.current = from;
+            setSelectedPeerId(from);
+            clientRef.current?.sendTransferAccept(from);
+            addLog(`Auto-accepted ${from} after NFC tap`);
+          });
+          return;
+        }
         setInvite({ from, file });
         addLog(
           file
@@ -341,7 +373,7 @@ export default function TransferTestPage() {
     };
   }, []);
 
-  const sendInvite = (peer: Peer) => {
+  const sendInvite = (peer: Peer, nfcToken?: string) => {
     setError("");
     selectedPeerRef.current = peer.id;
     setSelectedPeerId(peer.id);
@@ -361,8 +393,58 @@ export default function TransferTestPage() {
                 : "application/octet-stream",
           }
         : undefined,
+      nfcToken,
     );
   };
+
+  // NFC tap found a phone that isn't on our network: connect over WebRTC instead.
+  const connectAfterTap = ({ payload }: TapResult) => {
+    const peer = peers.find((item) => item.id === payload.ws);
+    if (!peer) {
+      setError(`${payload.alias} is not online right now. Try again once both devices have internet.`);
+      return;
+    }
+    sendInvite(peer, payload.token);
+    addLog(`NFC tap: connecting to ${payload.alias} over WebRTC`);
+  };
+
+  // Browser (Chrome on Android): tap a phone running the GlobalSend app.
+  const toggleWebNfcTap = async () => {
+    if (nfcAbortRef.current) {
+      nfcAbortRef.current.abort();
+      return;
+    }
+    const controller = new AbortController();
+    nfcAbortRef.current = controller;
+    setNfcScanning(true);
+    setError("");
+    try {
+      const link = await scanForConnectLink(controller.signal);
+      const peer = peersRef.current.find((item) => item.id === link.peerId);
+      if (link.peerId === SESSION_ID) return;
+      if (!peer) {
+        setError(`${link.alias ?? "That phone"} isn't online right now. Make sure it has internet and try again.`);
+        return;
+      }
+      sendInvite(peer, link.nfcToken ?? undefined);
+      toast.success(`Tapped ${peer.alias}`, { description: "Connecting without an accept prompt" });
+      addLog(`NFC tap: connecting to ${peer.alias}`);
+    } catch (scanError) {
+      if (!(scanError instanceof DOMException && scanError.name === "AbortError")) {
+        setError(scanError instanceof Error ? `NFC: ${scanError.message}` : "Could not use NFC");
+      }
+    } finally {
+      nfcAbortRef.current = null;
+      setNfcScanning(false);
+    }
+  };
+
+  const updateLanPeers = (lanPeers: LanPeer[]) => {
+    setLanSignalingIds(new Set(lanPeers.flatMap((peer) => (peer.signalingId ? [peer.signalingId] : []))));
+  };
+  // Same-network peers first. The native app lists LAN-discovered ones under "Nearby" instead.
+  const visiblePeers = (nativeApp ? peers.filter((peer) => !lanSignalingIds.has(peer.id)) : [...peers])
+    .sort((a, b) => Number(Boolean(b.nearby)) - Number(Boolean(a.nearby)));
 
   useEffect(() => {
     if (!connectPeerId) return;
@@ -390,14 +472,14 @@ export default function TransferTestPage() {
     }
 
     autoInviteSentToRef.current = connectPeerId;
-    clientRef.current?.sendTransferInvite(targetPeer.id);
+    clientRef.current?.sendTransferInvite(targetPeer.id, undefined, connectNfcToken ?? undefined);
     deferUiUpdate(() => {
       selectedPeerRef.current = targetPeer.id;
       setSelectedPeerId(targetPeer.id);
       setAutoConnectStatus("inviting");
       addLog(`QR link found ${targetPeer.id}; sending connection invite`);
     });
-  }, [connectPeerId, connectedPeers, peers]);
+  }, [connectPeerId, connectNfcToken, connectedPeers, peers]);
 
   const acceptInvite = () => {
     if (!invite) return;
@@ -517,26 +599,51 @@ export default function TransferTestPage() {
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
             <div className="space-y-6">
+              {nativeApp && (
+                <NativePanel
+                  signalingId={SESSION_ID}
+                  onTapRtc={connectAfterTap}
+                  onLanPeersChange={updateLanPeers}
+                  onLog={addLog}
+                />
+              )}
               <div className="rounded-3xl border border-stone-200 bg-stone-50/70 p-5">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold text-stone-900">Online peers</h2>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-stone-500 shadow-sm">
-                    {peers.length} visible
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {webNfc && !nativeApp && (
+                      <button
+                        onClick={() => void toggleWebNfcTap()}
+                        className={`rounded-full px-3 py-1 text-xs font-medium shadow-sm ${nfcScanning ? "bg-emerald-600 text-white" : "bg-stone-900 text-white hover:bg-stone-700"}`}
+                      >
+                        {nfcScanning ? "Hold near phone… (cancel)" : "Tap phone (NFC)"}
+                      </button>
+                    )}
+                    <span className="rounded-full bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-stone-500 shadow-sm">
+                      {visiblePeers.length} visible
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {peers.length === 0 && (
+                  {visiblePeers.length === 0 && (
                     <p className="rounded-2xl border border-dashed border-stone-300 px-4 py-6 text-sm text-stone-600">
                       No other peers yet. Open this route in another tab or device on the same signaling backend.
                     </p>
                   )}
-                  {peers.map((peer) => {
+                  {visiblePeers.map((peer) => {
                     const isConnected = connectedPeers.includes(peer.id);
                     return (
                       <div key={peer.id} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="font-medium text-stone-900">{peer.alias}</div>
+                            <div className="flex items-center gap-2 font-medium text-stone-900">
+                              {peer.alias}
+                              {peer.nearby && (
+                                <span title="On your network: transfers go directly over your Wi-Fi/LAN" className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                  Nearby
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-stone-500">{peer.id}</div>
                           </div>
                           <div className={`rounded-full px-3 py-1 text-xs font-medium ${isConnected ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-600"}`}>

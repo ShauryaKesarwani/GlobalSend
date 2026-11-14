@@ -8,7 +8,33 @@ Heavy work (LAN discovery, transfers, background, NFC) goes in Rust.
 native/
 ├─ Cargo.toml          Rust workspace
 ├─ crates/core/        globalsend-core: engine shared with the future CLI/TUI (no Tauri types)
+│  └─ src/lan/         LAN discovery (UDP multicast) + HTTP transfers
+├─ plugins/nfc/        tauri-plugin-gs-nfc: Android HCE tag + reader mode, Wi-Fi multicast lock
 └─ src-tauri/          Tauri shell: window, plugins, IPC commands, mobile projects (gen/)
+```
+
+## How LAN and NFC work
+
+- **Nearby devices:** every running app (foreground or background) multicasts a small JSON
+  announcement to `224.0.0.167:53318` every 10 s and runs an HTTP server on port 53318.
+  Peers drop out after 35 s of silence, or immediately when the app quits. See
+  `crates/core/src/lan/protocol.rs` for the wire format.
+- **Sending on LAN:** `prepare` → receiver accepts (prompt) → `upload` per file, streamed from
+  disk to disk. Files land in `Downloads/GlobalSend` (falls back to the app's data folder).
+- **Tap to send (Android):** the receiving phone acts as an NFC tag whenever it's unlocked
+  and the app process is alive. A tap hands the sender the receiver's name, IPs, port,
+  signaling id and a single-use token valid for 2 minutes. If the receiver answers on the
+  LAN, files go over LAN with no prompt. Otherwise the app sends a WebRTC invite carrying the
+  token, and the receiver auto-accepts it.
+- **Browsers:** the same tag also answers as a standard NDEF tag with a one-time website
+  link (`NEXT_PUBLIC_SITE_URL` + `/test?connectTo=…&nfcToken=…`), so Chrome on Android
+  (Web NFC "Tap phone" button) or a phone without the app can tap and connect over
+  WebRTC with no prompt. Without `NEXT_PUBLIC_SITE_URL` set at build time this is off.
+- Windows asks for firewall access the first time the app runs. Allow **private networks**,
+  otherwise other devices can't reach this PC.
+
+```bash
+cargo test -p globalsend-core   # unit + two-engine LAN tests (incl. multicast discovery)
 ```
 
 The app currently opens `/test/`, the working transfer UI, until the new UI design is ready.

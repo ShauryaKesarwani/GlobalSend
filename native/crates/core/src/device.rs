@@ -1,9 +1,9 @@
 //! Identity of the local device, shown to peers in discovery lists.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Operating system family, reported to peers so they can pick an icon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     Android,
@@ -11,6 +11,8 @@ pub enum Platform {
     Windows,
     Macos,
     Linux,
+    /// Anything a newer peer reports that this build doesn't know yet.
+    #[serde(other)]
     Unknown,
 }
 
