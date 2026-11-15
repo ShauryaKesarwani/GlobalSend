@@ -20,16 +20,28 @@ native/
   Peers drop out after 35 s of silence, or immediately when the app quits. See
   `crates/core/src/lan/protocol.rs` for the wire format.
 - **Sending on LAN:** `prepare` → receiver accepts (prompt) → `upload` per file, streamed from
-  disk to disk. Files selected in the page (picker, drag-and-drop, share) have no path, so the
-  page pushes them to Rust in 512 KiB base64 chunks (`lan_send_web` + `lan_push_chunk`). At most
-  4 chunks wait in memory per file. Base64 because Android's Tauri IPC carries text only: raw
-  byte payloads arrive as JSON number arrays there.
-- **Where received files go:** desktop: `Downloads/GlobalSend`. Android: received into the app's
-  private folder, then moved into the public `Download/GlobalSend` via MediaStore (Android 10+),
-  so they show in Files and Photos. Android 8–9 keep the private copy.
+  disk to disk.
+- **Selected files are references, not copies.** In the app, the picker and desktop drag-and-drop
+  give real paths / Android `content://` URIs (`describe_files` → `NativeFile` in the page):
+  - LAN: `lan_send` opens them in Rust and streams disk → network. Nothing passes through the page.
+  - WebRTC: the page reads 4 MB ranges from `http://127.0.0.1:<port>/api/globalsend/v1/local/files/{id}`
+    (loopback-only, per-launch token), so huge files never sit in memory.
+  - Browser `File`s (rare in the app) fall back to 512 KiB base64 chunks over IPC
+    (`lan_send_web` + `lan_push_chunk`), since Android's Tauri IPC carries text only.
+- **Where received files go:** desktop `Downloads/GlobalSend`. Android 11+ writes straight into
+  public `Download/GlobalSend` (as LocalSend does) and tells the media scanner, so files show in
+  Files and Photos. Older Android receives privately, then copies via MediaStore.
+- **Background (Android):** while any transfer runs, `TransferService` (a `dataSync` foreground
+  service) shows a progress notification and holds a CPU wake lock + low-latency Wi-Fi lock, so
+  switching apps or turning the screen off doesn't stop it. It stops when transfers finish.
+- **Incoming requests while in the background:** Android shows a notification with Accept /
+  Decline (Rust gets the button press directly). Desktop shows a notification and flashes the
+  taskbar. On Android the app must still be alive to receive: Android freezes background apps,
+  so turn on **Stay reachable in background** (runs `TransferService` as a `connectedDevice`
+  foreground service with an ongoing notification, no wake locks while idle).
 - **`tauri android dev`** loads the page through `tauri.localhost`; Next's hot-reload WebSocket
   fails there. For real testing, build and install the APK (`bun run android:build -- --debug
-  --apk --target aarch64`). Files land in `Downloads/GlobalSend` (falls back to the app's data folder).
+  --apk --target aarch64`).
 - **Tap to send (Android):** the receiving phone acts as an NFC tag whenever it's unlocked
   and the app process is alive. A tap hands the sender the receiver's name, IPs, port,
   signaling id and a single-use token valid for 2 minutes. If the receiver answers on the

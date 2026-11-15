@@ -4,12 +4,26 @@
     <!-- LAN discovery: Android drops multicast packets unless a MulticastLock is held. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Keep transfers running when the app is in the background (TransferService). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- "Stay reachable" mode: stay discoverable on the local network while closed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Optional so phones without NFC can still install the app. -->
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
 
     <application>
+        <service
+            android:name="com.globalsend.nfc.TransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|connectedDevice" />
+        <receiver
+            android:name="com.globalsend.nfc.RequestActionReceiver"
+            android:exported="false" />
         <!-- Lets other GlobalSend phones read our connection details by tapping. -->
         <service
             android:name="com.globalsend.nfc.TapHceService"

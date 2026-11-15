@@ -60,6 +60,7 @@ pub(crate) async fn serve(inner: Arc<Inner>, listener: TcpListener) {
         .route(&format!("{API}/prepare"), post(prepare))
         .route(&format!("{API}/upload"), post(upload).layer(DefaultBodyLimit::disable()))
         .route(&format!("{API}/cancel"), post(cancel))
+        .route(&format!("{API}/local/files/{{id}}"), get(super::local::read_range))
         .with_state(inner.clone());
     let mut shutdown = inner.shutdown.subscribe();
     let result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())

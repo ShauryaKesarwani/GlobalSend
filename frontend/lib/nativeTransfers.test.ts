@@ -14,6 +14,17 @@ test("tracks a received transfer from start to finish", () => {
   expect(list[0]).toMatchObject({ status: "done", transferred: 10, saved: [{ name: "a.txt", path: "/dl/a.txt" }] });
 });
 
+test("shows a smoothed speed while active and the average when done", () => {
+  let list = applyTransferEvent([], { type: "transferStarted", transferId: "t", direction: "send", peer, files, totalSize: 10_000_000, autoAccepted: false }, 0);
+  list = applyTransferEvent(list, { type: "transferProgress", transferId: "t", direction: "send", fileId: "0", transferred: 1_000_000, totalSize: 10_000_000 }, 1000);
+  expect(list[0].speedBps).toBe(1_000_000);
+  // Updates closer than 200 ms only move the byte count.
+  list = applyTransferEvent(list, { type: "transferProgress", transferId: "t", direction: "send", fileId: "0", transferred: 1_100_000, totalSize: 10_000_000 }, 1100);
+  expect(list[0]).toMatchObject({ speedBps: 1_000_000, transferred: 1_100_000 });
+  list = applyTransferEvent(list, { type: "transferFinished", transferId: "t", direction: "send", ok: true, error: null }, 5000);
+  expect(list[0].speedBps).toBe(2_000_000);
+});
+
 test("keeps the error of a failed transfer and ignores unrelated events", () => {
   let list = applyTransferEvent([], { type: "transferStarted", transferId: "t", direction: "send", peer, files, totalSize: 10, autoAccepted: false });
   list = applyTransferEvent(list, { type: "peersChanged", peers: [] });

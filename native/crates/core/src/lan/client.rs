@@ -116,7 +116,7 @@ pub(crate) async fn send(
         .timeout(ACCEPT_TIMEOUT + Duration::from_secs(15))
         .send();
     let response = tokio::select! {
-        response = prepare => response.map_err(|err| format!("could not reach {}: {err}", peer.alias))?,
+        response = prepare => response.map_err(|err| format!("could not reach {}: {}", peer.alias, err.without_url()))?,
         _ = cancelled(&mut cancel) => return Err("cancelled".to_owned()),
     };
     let session: PrepareResponse = match response.status() {
@@ -138,7 +138,7 @@ pub(crate) async fn send(
             .send();
         tokio::select! {
             result = upload => {
-                let response = result.map_err(|err| format!("upload of {} failed: {err}", meta.name))?;
+                let response = result.map_err(|err| format!("upload of {} failed: {}", meta.name, err.without_url()))?;
                 if !response.status().is_success() {
                     let reason = response.text().await.unwrap_or_default();
                     return Err(format!("{} was rejected: {reason}", meta.name));

@@ -55,6 +55,45 @@ mod android {
     }
 
     #[derive(Serialize)]
+    struct UriArgs<'a> {
+        uri: &'a str,
+    }
+
+    #[derive(Deserialize)]
+    struct OptionalName {
+        name: Option<String>,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TransferStatusArgs<'a> {
+        active: bool,
+        title: &'a str,
+        text: &'a str,
+        percent: i32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RequestArgs<'a> {
+        request_id: &'a str,
+        title: &'a str,
+        text: &'a str,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RequestAction {
+        request_id: String,
+        accept: bool,
+    }
+
+    #[derive(Serialize)]
+    struct PresenceArgs {
+        enabled: bool,
+    }
+
+    #[derive(Serialize)]
     struct PublishArgs<'a> {
         path: &'a str,
         name: &'a str,
@@ -100,6 +139,48 @@ mod android {
             self.0.run_mobile_plugin::<()>("acquireMulticastLock", ()).map_err(err)
         }
 
+        /// Real name of a `content://` URI, if the provider knows it.
+        pub async fn display_name(&self, uri: &str) -> Option<String> {
+            self.0.run_mobile_plugin_async::<OptionalName>("displayName", UriArgs { uri }).await.ok().and_then(|r| r.name)
+        }
+
+        /// Keeps the app alive during transfers (foreground service + notification).
+        pub async fn transfer_status(&self, active: bool, title: &str, text: &str, percent: i32) -> Result<()> {
+            self.0
+                .run_mobile_plugin_async::<()>("transferStatus", TransferStatusArgs { active, title, text, percent })
+                .await
+                .map_err(err)
+        }
+
+        /// "Stay reachable": keep the app alive in the background (foreground service).
+        pub async fn set_presence(&self, enabled: bool) -> Result<()> {
+            self.0.run_mobile_plugin_async::<()>("setPresence", PresenceArgs { enabled }).await.map_err(err)
+        }
+
+        /// Accept/Decline notification for an incoming request (skipped while the app is on screen).
+        pub async fn notify_request(&self, request_id: &str, title: &str, text: &str) -> Result<()> {
+            self.0
+                .run_mobile_plugin_async::<()>("notifyRequest", RequestArgs { request_id, title, text })
+                .await
+                .map_err(err)
+        }
+
+        pub async fn cancel_request(&self, request_id: &str) -> Result<()> {
+            self.0
+                .run_mobile_plugin_async::<()>("cancelRequest", RequestArgs { request_id, title: "", text: "" })
+                .await
+                .map_err(err)
+        }
+
+        /// Waits for the next Accept/Decline button press: `(request_id, accept)`.
+        pub async fn next_request_action(&self) -> Result<(String, bool)> {
+            self.0
+                .run_mobile_plugin_async::<RequestAction>("nextRequestAction", ())
+                .await
+                .map(|a| (a.request_id, a.accept))
+                .map_err(err)
+        }
+
         /// Moves a received file into the public Download/GlobalSend folder.
         /// Returns the user-facing location.
         pub async fn publish_download(&self, path: &str, name: &str) -> Result<String> {
@@ -133,6 +214,28 @@ mod fallback {
         }
         /// Desktop OSes deliver multicast without a lock.
         pub fn acquire_multicast_lock(&self) -> Result<()> {
+            Ok(())
+        }
+        pub async fn display_name(&self, _uri: &str) -> Option<String> {
+            None
+        }
+        /// Desktop apps keep running in the background on their own.
+        pub async fn set_presence(&self, _enabled: bool) -> Result<()> {
+            Ok(())
+        }
+        /// Desktop notifications are handled by the app (tauri-plugin-notification).
+        pub async fn notify_request(&self, _request_id: &str, _title: &str, _text: &str) -> Result<()> {
+            Ok(())
+        }
+        pub async fn cancel_request(&self, _request_id: &str) -> Result<()> {
+            Ok(())
+        }
+        /// No notification buttons on desktop: never resolves.
+        pub async fn next_request_action(&self) -> Result<(String, bool)> {
+            std::future::pending().await
+        }
+        /// Desktop apps aren't frozen in the background.
+        pub async fn transfer_status(&self, _active: bool, _title: &str, _text: &str, _percent: i32) -> Result<()> {
             Ok(())
         }
         /// Desktop already saves straight into Downloads/GlobalSend.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { SendableFile } from "@/lib/sendableFile";
 
 export type DockReceivedFile = { id: string; name: string; objectUrl: string };
 
@@ -20,9 +21,11 @@ export function downloadAll(files: DockReceivedFile[]) {
 }
 
 type Props = {
-  selectedFiles: File[];
+  selectedFiles: SendableFile[];
   receivedFiles: DockReceivedFile[];
   onSelect: (files: File[]) => void;
+  /** Native app: open the system picker instead of the browser file input. */
+  onPickNative?: (kind: "media" | "any") => void;
   onSend: () => void;
   sending: boolean;
   target: string;
@@ -31,7 +34,7 @@ type Props = {
 
 const button = "inline-flex min-h-9 shrink-0 items-center justify-center rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-700";
 
-export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, sending, target, error }: Props) {
+export function TransferDock({ selectedFiles, receivedFiles, onSelect, onPickNative, onSend, sending, target, error }: Props) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-3xl border border-b-0 border-stone-200 bg-[#faf9f6] pb-[env(safe-area-inset-bottom)] text-stone-900 shadow-[0_-8px_30px_rgba(58,41,19,0.12)]" aria-label="File transfer controls">
@@ -43,6 +46,12 @@ export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, s
         </button>
         <div className="flex min-w-0 flex-col items-start gap-1 sm:shrink-0">
           <h2 className="text-sm font-semibold text-stone-900">Select or drag and drop files</h2>
+          {onPickNative ? (
+            <div className="flex flex-wrap gap-1">
+              <button type="button" className={button} onClick={() => onPickNative("media")}>Photos / videos</button>
+              <button type="button" className={button} onClick={() => onPickNative("any")}>Any files</button>
+            </div>
+          ) : (
           <div className="flex flex-wrap gap-1">
             <label className={`${button} cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-stone-700`}>
               Photos / videos
@@ -53,6 +62,7 @@ export function TransferDock({ selectedFiles, receivedFiles, onSelect, onSend, s
               <input aria-label="Select any files" className="sr-only" type="file" multiple onChange={(event) => { if (event.target.files?.length) onSelect(Array.from(event.target.files)); event.target.value = ""; }} />
             </label>
           </div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <ul aria-label="Selected files" className="max-h-20 overflow-y-auto text-sm leading-6 text-stone-700" title={target ? `Target: ${target}` : "No peer selected"}>

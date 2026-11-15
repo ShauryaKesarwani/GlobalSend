@@ -1,6 +1,7 @@
 // Typed bridge to the native app's Rust side (native/src-tauri/src/commands.rs).
 // Only call these when isNativeApp() is true; the website never loads Tauri.
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { NativeFile, type NativeFileInfo } from "./sendableFile";
 
 export type Platform = "android" | "ios" | "windows" | "macos" | "linux" | "unknown";
 
@@ -15,6 +16,8 @@ export type AppSettings = {
   downloadDir: string;
   lanPort: number;
   nfc: NfcStatus;
+  /** Android: keep running in the background so others can send while closed. */
+  stayReachable: boolean;
 };
 
 export type LanPeer = {
@@ -95,12 +98,14 @@ export async function pushFiles(
 export const native = {
   settings: () => call<AppSettings>("app_settings"),
   setDeviceName: (name: string) => call<string>("set_device_name", { name }),
+  setStayReachable: (enabled: boolean) => call<boolean>("set_stay_reachable", { enabled }),
   setSignalingId: (id: string | null, siteUrl?: string) =>
     call<void>("set_signaling_id", { id, siteUrl: siteUrl || null }),
   lanPeers: () => call<LanPeer[]>("lan_peers"),
   lanRefresh: () => call<void>("lan_refresh"),
-  lanSend: (peerId: string, paths: string[], tapToken?: string) =>
-    call<string>("lan_send", { peerId, paths, tapToken: tapToken ?? null }),
+  /** Native files: Rust reads them straight from disk (fastest path). */
+  lanSend: (peerId: string, files: NativeFile[], tapToken?: string) =>
+    call<string>("lan_send", { peerId, files: files.map(({ path, name }) => ({ path, name })), tapToken: tapToken ?? null }),
   /** Sends files the page holds (picked, dropped or shared) without needing paths. */
   async lanSendWeb(peerId: string, files: File[], tapToken?: string): Promise<string> {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -119,11 +124,31 @@ export const native = {
   verifyTapToken: (token: string) => call<boolean>("verify_tap_token", { token }),
 
   /** Native file picker; returns paths (desktop) or content:// URIs (Android). */
-  async pickFiles(): Promise<string[]> {
+  /** Native file picker; returns references to the real files (paths / content:// URIs). */
+  async pickFiles(kind: "media" | "any" = "any"): Promise<NativeFile[]> {
     const { open } = await import("@tauri-apps/plugin-dialog");
-    const picked = await open({ multiple: true, directory: false });
+    const picked = await open({ multiple: true, directory: false, pickerMode: kind === "media" ? "media" : undefined });
     if (!picked) return [];
-    return Array.isArray(picked) ? picked : [picked];
+    return native.describeFiles(Array.isArray(picked) ? picked : [picked]);
+  },
+
+  /** Turns paths (picked, dropped, shared) into sendable file references. */
+  async describeFiles(paths: string[]): Promise<NativeFile[]> {
+    const infos = await call<NativeFileInfo[]>("describe_files", { paths });
+    return infos.map((info) => new NativeFile(info));
+  },
+
+  /** Desktop drag-and-drop: the app window receives real paths, not browser files. */
+  async onFileDrop(handlers: { hover: (over: boolean) => void; drop: (paths: string[]) => void }): Promise<UnlistenFn> {
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    return getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type === "enter" || payload.type === "over") handlers.hover(true);
+      else if (payload.type === "leave") handlers.hover(false);
+      else {
+        handlers.hover(false);
+        if (payload.paths.length) handlers.drop(payload.paths);
+      }
+    });
   },
 
   async onLanEvent(handler: (event: LanEvent) => void): Promise<UnlistenFn> {

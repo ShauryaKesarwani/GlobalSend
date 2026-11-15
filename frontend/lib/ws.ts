@@ -6,6 +6,7 @@ import { transferShardCount, wsUrl } from "@/src/config";
 import { openReceiveSink, type ReceiveSink } from "@/lib/receiveStorage";
 import { fetchIceConfig } from "@/webrtc/iceConfig";
 import { randomId } from "@/lib/randomId";
+import type { SendableFile } from "@/lib/sendableFile";
 
 /** `nearby`: same network as us (per the signaling server), so WebRTC goes direct over LAN. */
 type Peer = { id: string; alias: string; nearby?: boolean };
@@ -164,7 +165,7 @@ export class PeerConnectionGroup {
   }
 
   public async sendFile(
-    file: File,
+    file: SendableFile,
     handlers?: {
       onProgress?: (sentBytes: number, totalBytes: number) => void;
     },
@@ -580,7 +581,7 @@ export class WSClient {
     this.peers.get(to)?.sendMessage(message);
   }
 
-  public async sendFile(to: string, file: File) {
+  public async sendFile(to: string, file: SendableFile) {
     const peer = this.peers.get(to);
     if (!peer) throw new Error(`Peer ${to} is not connected`);
     await peer.sendFile(file, {

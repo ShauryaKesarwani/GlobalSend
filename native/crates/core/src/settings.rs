@@ -12,11 +12,15 @@ pub struct Settings {
     /// Name shown to other devices. `None` until the user picks one on first startup.
     #[serde(default)]
     pub device_name: Option<String>,
+    /// Android: keep running in the background so nearby devices can send
+    /// while the app is closed (shows a persistent notification).
+    #[serde(default)]
+    pub stay_reachable: bool,
 }
 
 impl Settings {
     fn fresh() -> Self {
-        Self { device_id: uuid::Uuid::new_v4().to_string(), device_name: None }
+        Self { device_id: uuid::Uuid::new_v4().to_string(), device_name: None, stay_reachable: false }
     }
 
     /// Loads settings from `path`, creating (and saving) new ones if missing or unreadable.

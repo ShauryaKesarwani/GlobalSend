@@ -216,3 +216,24 @@ async fn streams_pushed_chunks() {
     assert!(ok, "{err:?}");
     assert_eq!(std::fs::read(b.dir.path().join("received").join("web.bin")).unwrap(), data);
 }
+
+/// The app's own UI reads native files (paths / content URIs) by range over loopback.
+#[tokio::test]
+async fn local_ui_reads_registered_files_by_range() {
+    let a = node("alpha", None).await;
+    let path = a.dir.path().join("local.bin");
+    std::fs::write(&path, b"0123456789").unwrap();
+    let url = a.engine.register_local_file(10, Box::new(move || std::fs::File::open(&path)));
+    let get = |u: String| async move { reqwest::get(u).await.unwrap() };
+
+    let ok = get(format!("{url}&start=2&end=6")).await;
+    assert_eq!(ok.status(), 200);
+    assert_eq!(ok.headers()["access-control-allow-origin"], "*");
+    assert_eq!(&ok.bytes().await.unwrap()[..], b"2345");
+    // The end is clamped to the file size.
+    assert_eq!(&get(format!("{url}&start=8&end=99")).await.bytes().await.unwrap()[..], b"89");
+
+    let bad_token = url.replace("token=", "token=x");
+    assert_eq!(get(format!("{bad_token}&start=0&end=1")).await.status(), 403);
+    assert_eq!(get(format!("{url}&start=5&end=2")).await.status(), 416);
+}

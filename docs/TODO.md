@@ -71,7 +71,16 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 - [x] 🔴 **LAN discovery + transfer (GlobalSend protocol v1)** — UDP multicast `224.0.0.167:53318` + HTTP on port 53318 (`native/crates/core/src/lan/`). Devices with the app open or in the background appear under "Nearby"; prompt to accept, streaming to `Downloads/GlobalSend`, no overwrite, cancel. Website peers that are also on the LAN are listed under Nearby instead. Android `MulticastLock` in `plugins/nfc`. Covered by `crates/core/tests/lan.rs`.
   - [x] 🐛 Fixed: app crashed on LAN send (`tokio::spawn` from a sync command on the main thread); the engine now spawns on its own runtime handle. Regression test in `tests/lan.rs`.
   - [x] Nearby/tap "Send" uses the files already selected in the page (streamed in 1 MiB chunks over IPC) instead of opening a second picker.
-  - [ ] 🔴 Verify on the Pixel: LAN send phone ↔ PC with page-selected files; `tauri android dev` connecting to the backend (assets now load straight from the dev host via `assetPrefix`).
+  - [x] 🐛 Fixed: phone → PC stalled at 0%. Android IPC is text-only, so raw chunks were rejected; chunks are now base64 and a failed push cancels the transfer.
+  - [x] Android: received files move to public `Download/GlobalSend` (MediaStore, Android 10+) so they appear in Files/Photos.
+  - [x] **File references instead of browser files** in the app: the picker (Photos/videos, Any files) and desktop drag-and-drop give real paths / `content://` URIs (`NativeFile`, `lib/sendableFile.ts`). LAN sends read them from disk in Rust (no page, no base64). WebRTC sends read 4 MB ranges from a loopback-only, token-protected endpoint (`/local/files/{id}`). Browser `File`s still work (base64 fallback). Approach checked against LocalSend, which also reads content URIs by file descriptor.
+  - [x] Android receives straight into public `Download/GlobalSend` (Android 11+, like LocalSend) and the media scanner indexes it; older versions copy via MediaStore.
+  - [x] Transfer speed shown (live, then average).
+  - [ ] 🔴 Verify on the Pixel: phone ↔ PC speed with native picks, background transfer with the screen off, files visible in Files/Photos.
+  - [ ] 🔴 Release builds: Android blocks cleartext HTTP from the webview, which the loopback file endpoint (`http://127.0.0.1`) needs. Add a network security config allowing cleartext to 127.0.0.1 only.
+  - [ ] 🟡 Speed: parallel uploads per transfer (LocalSend allows it), tune read/write buffer sizes, measure against LocalSend on the same Wi-Fi.
+  - [ ] 🟡 "Open" / "Show in folder" buttons for received files (opener plugin).
+  - [ ] 🟢 `tauri android dev` with Next.js: the page loads via tauri.localhost and hot reload fails; scripts didn't run when assets were served from the dev host (`assetPrefix`, reverted). Use APK builds for now.
   - [ ] 🔴 Test on two real phones + a PC on the same Wi-Fi (Windows asks for firewall access on first launch — allow private networks).
   - [ ] 🟡 Encrypt LAN traffic: HTTPS with self-signed certs pinned via the announcement (currently plain HTTP).
   - [x] **Browser "Nearby"** — browsers can't multicast or run a server, so the signaling server marks peers on the same network (public IPv4 / IPv6 /64, never sent to clients) with `nearby: true`; the page shows a Nearby badge and lists them first, and WebRTC connects them directly over the LAN. Needs internet. `backend/src/presence/network.ts`.
@@ -81,8 +90,13 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
   - [ ] 🟡 iOS: Local Network usage string + multicast entitlement request to Apple.
   - [ ] 🟡 **LocalSend compatibility** — second listener on `224.0.0.167:53317` speaking LocalSend v2 (HTTPS), so we show up in LocalSend and vice versa. Protocol shape already mirrors it.
 - [ ] 🟡 **No shared network at all** — LAN needs the same Wi-Fi or a hotspot (works without internet). Phone ↔ phone with no network would need Wi-Fi Direct / Wi-Fi Aware or Bluetooth (Android only; custom plugin).
-- [ ] 🔴 **Background transfers on app switch** — Android foreground service / user-initiated data transfer job. iOS: not possible for P2P (~30 s grace only) — document the limit.
-- [ ] 🔴 **Transfer progress in notification** — Android foreground-service notification with progress; iOS Live Activity (optional, only while the app may run).
+- [x] 🔴 **Background transfers on app switch** — Android `dataSync` foreground service (`TransferService`) runs only while a transfer is active, with a partial wake lock and a low-latency Wi-Fi lock, as LocalSend does. iOS: not possible for P2P (~30 s grace only).
+- [x] 🔴 **Transfer progress in notification** — the same service shows "Sending X to Y · N%", updated once a second. Asks for notification permission on Android 13+. iOS Live Activity: optional, later.
+- [x] 🔴 **Always-on presence, KDE Connect style (first step)** — "Stay reachable in background" toggle (Android, off by default, saved in settings): `TransferService` runs as a `connectedDevice` foreground service with a quiet ongoing notification and no wake/Wi-Fi locks while idle.
+  - [ ] 🟡 Lower idle cost further: longer announce interval when idle, pause on battery saver / when not on Wi-Fi, start on boot (optional).
+  - [ ] 🟡 Check KDE Connect's approach (its sources didn't load for research).
+- [x] 🔴 **Accept from a notification** — Android: heads-up "X wants to send you …" with Accept / Decline buttons when the app isn't on screen; button presses reach Rust through a long-poll, so they work without the page. Windows/desktop: notification + taskbar flash when the window isn't focused; accept in the app window.
+  - [ ] 🟡 Desktop: Accept/Decline buttons in the Windows toast (needs a toast with actions; tauri-plugin-notification has none on desktop), and a tray icon so closing the window keeps the app reachable.
 - [ ] 🟡 **Internet transfers with website users** — WebRTC in Rust (`webrtc-rs`) speaking the same signaling/protocol as the web app.
 - [ ] 🔴 **NFC tap to connect** — tap exchanges pairing info only, data goes over Wi-Fi. Android ↔ Android via HCE (one phone emulates a tag, custom Kotlin plugin) + reader (official `plugin-nfc`). iPhone can read only. QR stays the fallback.
   - [x] Implemented (untested on hardware): receiver's HCE service (`plugins/nfc/android`) returns name/IPs/port/signaling id + a single-use HMAC token (2 min); sender reads it in reader mode. Same LAN → LAN transfer with no accept prompt; otherwise WebRTC invite carrying `nfcToken`, auto-accepted after `verify_tap_token`. Locked phones don't answer.
@@ -93,8 +107,11 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
   - [ ] 🔴 Test Web NFC + "no app" tap on real phones (Kotlin still uncompiled). If another installed app also emulates NDEF, Android may ask which one to use.
   - [ ] 🟡 Two app phones touched without "Tap to send" pressed: one may open the website link in its browser. Consider foreground dispatch in the app to swallow it.
 - [ ] 🟡 **Quick Share interop (experimental, desktop)** — integrate `rqs_lib` from rquickshare (GPL-3.0, compatible with our AGPL-3.0), pinned to a commit, so PCs appear in Android's Quick Share. Limits: same Wi-Fi only, Samsung unreliable, may break on Google protocol changes. Android app: use the system share sheet (already includes Quick Share). iOS: not possible.
-- [ ] 🟡 **Receive files shared from other apps** — native share intent / share extension (replaces the PWA `share_target`).
-- [ ] 🟡 **Save received files to a user-visible location** — Tauri `fs` plugin instead of OPFS.
+- [ ] 🔴 **Android share menu** — "Share → GlobalSend" from any app (`ACTION_SEND` / `ACTION_SEND_MULTIPLE` intent filter); hands `content://` URIs to the page as `NativeFile`s. Replaces the PWA `share_target` in the app.
+- [ ] 🟡 **Android drag-and-drop** (Android 13+, e.g. split screen / desktop mode): accept dropped `content://` URIs (`DragEvent` + `requestDragAndDropPermissions`).
+- [ ] 🟢 **iPhone drag-and-drop / share extension** — optional, once iOS work starts (needs a Mac).
+- [ ] 🟡 **Windows "Send with GlobalSend"** — Explorer context menu entry and file-select launch (`globalsend.exe --send <paths>`), via the installer (NSIS/MSI registry keys) and the single-instance plugin so a running app receives the paths.
+- [x] 🟡 **Save received files to a user-visible location** — desktop `Downloads/GlobalSend`, Android public `Download/GlobalSend`.
 
 ### Later
 

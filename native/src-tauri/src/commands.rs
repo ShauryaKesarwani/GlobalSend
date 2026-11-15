@@ -37,6 +37,8 @@ pub struct AppSettings {
     download_dir: String,
     lan_port: u16,
     nfc: NfcStatus,
+    /// Android: keep running in the background so others can send while closed.
+    stay_reachable: bool,
 }
 
 #[tauri::command]
@@ -52,6 +54,7 @@ pub fn app_settings<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>
         download_dir: state.download_dir.display().to_string(),
         lan_port: state.engine.port(),
         nfc: app.gs_nfc().status(),
+        stay_reachable: settings.stay_reachable,
     }
 }
 
@@ -66,6 +69,16 @@ pub fn set_device_name<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeSta
     state.engine.set_alias(name.clone());
     state.sync_tap_payload(&app);
     Ok(name)
+}
+
+/// Turns "Stay reachable in background" on or off (Android foreground service).
+#[tauri::command]
+pub async fn set_stay_reachable<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>, enabled: bool) -> CmdResult<bool> {
+    app.gs_nfc().set_presence(enabled).await.map_err(|e| e.to_string())?;
+    let mut settings = state.settings.lock().unwrap();
+    settings.stay_reachable = enabled;
+    settings.save(&state.settings_path).map_err(|e| format!("Could not save settings: {e}"))?;
+    Ok(enabled)
 }
 
 /// The webview's signaling-server session id (None when offline) and the public
@@ -93,26 +106,76 @@ pub fn lan_refresh(state: State<'_, NativeState>) {
     state.engine.refresh();
 }
 
-/// Sends picked files (paths or Android `content://` URIs) to a LAN peer.
+#[derive(serde::Deserialize)]
+pub struct PathFile {
+    /// Path or Android `content://` URI.
+    path: String,
+    /// Display name (from `describe_files`), since URIs often lack one.
+    name: String,
+}
+
+/// Sends native files to a LAN peer. Rust reads them straight from disk, so
+/// nothing passes through the webview and LAN runs at full Wi-Fi speed.
 #[tauri::command]
 pub fn lan_send<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, NativeState>,
     peer_id: String,
-    paths: Vec<String>,
+    files: Vec<PathFile>,
     tap_token: Option<String>,
 ) -> CmdResult<String> {
-    let mut files = Vec::with_capacity(paths.len());
-    for path in &paths {
-        let file_path = FilePath::from_str(path).unwrap_or_else(|never| match never {});
+    let mut outgoing = Vec::with_capacity(files.len());
+    for PathFile { path, name } in files {
+        let file_path = FilePath::from_str(&path).unwrap_or_else(|never| match never {});
         let mut options = OpenOptions::new();
         options.read(true);
-        let file = app.fs().open(file_path, options).map_err(|e| format!("Could not open {path}: {e}"))?;
-        let size = file.metadata().map_err(|e| format!("Could not read {path}: {e}"))?.len();
-        let name = display_name_from_path(path);
-        files.push(OutgoingFile { mime_type: guess_mime(&name).to_owned(), name, size, source: FileSource::Disk(file) });
+        let file = app.fs().open(file_path, options).map_err(|e| format!("Could not open {name}: {e}"))?;
+        let size = file.metadata().map_err(|e| format!("Could not read {name}: {e}"))?.len();
+        outgoing.push(OutgoingFile { mime_type: guess_mime(&name).to_owned(), name, size, source: FileSource::Disk(file) });
     }
-    state.engine.send_files(&peer_id, files, tap_token).map_err(|e| e.to_string())
+    state.engine.send_files(&peer_id, outgoing, tap_token).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeFileInfo {
+    /// Path or Android `content://` URI; pass to `lan_send`.
+    path: String,
+    name: String,
+    size: u64,
+    mime_type: String,
+    /// Loopback URL the UI reads byte ranges from (add `&start=..&end=..`).
+    url: String,
+}
+
+/// Turns picked or dropped paths into file references the UI can list and send:
+/// LAN sends read them from disk in Rust, WebRTC sends read ranges via `url`.
+#[tauri::command]
+pub async fn describe_files<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, NativeState>,
+    paths: Vec<String>,
+) -> CmdResult<Vec<NativeFileInfo>> {
+    let mut described = Vec::with_capacity(paths.len());
+    for path in paths {
+        let open = {
+            let app = app.clone();
+            let path = path.clone();
+            move || {
+                let mut options = OpenOptions::new();
+                options.read(true);
+                app.fs().open(FilePath::from_str(&path).unwrap_or_else(|never| match never {}), options)
+            }
+        };
+        let file = open().map_err(|e| format!("Could not open {path}: {e}"))?;
+        let size = file.metadata().map_err(|e| format!("Could not read {path}: {e}"))?.len();
+        // content:// URIs are often just ids; ask Android for the real name.
+        let real_name = if path.starts_with("content://") { app.gs_nfc().display_name(&path).await } else { None };
+        let name = real_name.unwrap_or_else(|| display_name_from_path(&path));
+        let url = state.engine.register_local_file(size, Box::new(open));
+        described.push(NativeFileInfo { mime_type: guess_mime(&name).to_owned(), name, size, url, path });
+    }
+    Ok(described)
 }
 
 /// How many pushed chunks may wait in memory per file before the web UI has to wait.

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { native, type AppSettings, type LanEvent, type LanPeer, type TapResult } from "@/lib/native";
 import { applyTransferEvent, type NativeTransfer } from "@/lib/nativeTransfers";
 import { env } from "@/src/config";
+import { isNativeFile, type SendableFile } from "@/lib/sendableFile";
 
 type IncomingRequest = Extract<LanEvent, { type: "incomingRequest" }>;
 type TappedLanPeer = { peer: LanPeer; token?: string };
@@ -27,7 +28,7 @@ function errorText(error: unknown) {
 type Props = {
   signalingId: string;
   /** Files already chosen at the bottom of the page; sent instead of opening a picker. */
-  selectedFiles: File[];
+  selectedFiles: SendableFile[];
   /** Tapped device isn't on this network: continue over WebRTC. */
   onTapRtc: (result: TapResult) => void;
   onLanPeersChange: (peers: LanPeer[]) => void;
@@ -111,15 +112,16 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
   // Sends the files selected at the bottom of the page, or asks for some first.
   const sendTo = async (peer: LanPeer, tapToken?: string) => {
     try {
-      let count = selectedFiles.length;
-      if (count) {
-        await native.lanSendWeb(peer.id, selectedFiles, tapToken);
-      } else {
-        const paths = await native.pickFiles();
-        if (!paths.length) return;
-        count = paths.length;
-        await native.lanSend(peer.id, paths, tapToken);
-      }
+      const files: SendableFile[] = selectedFiles.length ? selectedFiles : await native.pickFiles();
+      if (!files.length) return;
+      const count = files.length;
+      // Native references: Rust reads them from disk (fast). Browser files (rare in
+      // the app) are streamed in through the page. A tap token works once, so it
+      // goes with the first batch.
+      const nativeFiles = files.filter(isNativeFile);
+      const webFiles = files.filter((file): file is File => file instanceof File);
+      if (nativeFiles.length) await native.lanSend(peer.id, nativeFiles, tapToken);
+      if (webFiles.length) await native.lanSendWeb(peer.id, webFiles, nativeFiles.length ? undefined : tapToken);
       onLog(`LAN: sending ${count} file(s) to ${peer.alias}${tapToken ? " (tap, no prompt)" : ""}`);
     } catch (error) {
       toast.error(errorText(error));
@@ -189,6 +191,29 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
         )}
       </div>
 
+      {settings?.platform === "android" && (
+        <label className="mt-3 flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={settings.stayReachable}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void native.setStayReachable(enabled)
+                .then(() => setSettings((s) => (s ? { ...s, stayReachable: enabled } : s)))
+                .catch((error) => toast.error(errorText(error)));
+            }}
+          />
+          <span>
+            <span className="font-medium text-stone-900">Stay reachable in background</span>
+            <span className="block text-xs text-stone-500">
+              Nearby devices can send you files while the app is closed. You get a notification to accept. Shows a small
+              ongoing notification; uses little battery when idle.
+            </span>
+          </span>
+        </label>
+      )}
+
       {nfc?.supported && (
         <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-3 text-sm">
           {!nfc.enabled ? (
@@ -256,7 +281,11 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
                   <div className={`h-full ${t.status === "failed" ? "bg-red-400" : "bg-emerald-500"}`} style={{ width: `${percent}%` }} />
                 </div>
                 <div className="mt-1 flex items-center justify-between text-xs text-stone-500">
-                  <span>{formatBytes(t.transferred)} / {formatBytes(t.totalSize)}{t.autoAccepted ? " · via tap" : ""}</span>
+                  <span>
+                    {formatBytes(t.transferred)} / {formatBytes(t.totalSize)}
+                    {t.speedBps > 0 ? ` · ${formatBytes(t.speedBps)}/s${t.status === "done" ? " avg" : ""}` : ""}
+                    {t.autoAccepted ? " · via tap" : ""}
+                  </span>
                   {t.status === "active" && (
                     <button onClick={() => void native.lanCancel(t.id)} className="underline">Cancel</button>
                   )}

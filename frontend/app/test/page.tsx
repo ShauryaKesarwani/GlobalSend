@@ -15,6 +15,7 @@ import { WSClient } from "@/lib/ws";
 import { messageUrl } from "@/lib/messageUrl";
 import { takeSharedFiles } from "@/lib/sharedFiles";
 import { native, type LanPeer, type TapResult } from "@/lib/native";
+import type { SendableFile } from "@/lib/sendableFile";
 import { isNativeApp } from "@/lib/platform";
 
 type Peer = { id: string; alias: string; nearby?: boolean };
@@ -132,7 +133,7 @@ export default function TransferTestPage() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
   const [invite, setInvite] = useState<IncomingInvite | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<SendableFile[]>([]);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
@@ -242,6 +243,38 @@ export default function TransferTestPage() {
   useEffect(() => {
     peersRef.current = peers;
   }, [peers]);
+
+  // Native app: dropped files arrive as real paths through Tauri, not as browser files.
+  useEffect(() => {
+    if (!nativeApp) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void native.onFileDrop({
+      hover: setDraggingFiles,
+      drop: (paths) => {
+        void native.describeFiles(paths).then((files) => {
+          setSelectedFiles(files);
+          setError("");
+        }).catch((dropError) => setError(String(dropError)));
+      },
+    }).then((fn) => (disposed ? fn() : (unlisten = fn)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [nativeApp]);
+
+  const pickNativeFiles = async (kind: "media" | "any") => {
+    try {
+      const files = await native.pickFiles(kind);
+      if (files.length) {
+        setSelectedFiles(files);
+        setError("");
+      }
+    } catch (pickError) {
+      setError(String(pickError));
+    }
+  };
 
   useEffect(() => () => nfcAbortRef.current?.abort(), []);
 
@@ -803,6 +836,7 @@ export default function TransferTestPage() {
         selectedFiles={selectedFiles}
         receivedFiles={receivedFiles}
         onSelect={(files) => { setSelectedFiles(files); setError(""); }}
+        onPickNative={nativeApp ? (kind) => void pickNativeFiles(kind) : undefined}
         onSend={() => void sendSelectedFiles()}
         sending={sending}
         target={selectedPeerId}

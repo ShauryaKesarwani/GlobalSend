@@ -11,6 +11,7 @@
 mod client;
 mod discovery;
 pub mod files;
+pub mod local;
 pub mod protocol;
 mod server;
 
@@ -188,6 +189,9 @@ pub(crate) struct Inner {
     pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     sessions: Mutex<HashMap<String, server::ReceiveSession>>,
     outgoing: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// Files the local UI may read by range (see `local`), and the token it must send.
+    local_files: Mutex<HashMap<String, local::LocalFile>>,
+    local_token: String,
     http: reqwest::Client,
     shutdown: watch::Sender<bool>,
     announce_now: Notify,
@@ -308,6 +312,8 @@ impl LanEngine {
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             outgoing: Mutex::new(HashMap::new()),
+            local_files: Mutex::new(HashMap::new()),
+            local_token: hex::encode(rand::random::<[u8; 16]>()),
             http,
             shutdown,
             announce_now: Notify::new(),
@@ -325,6 +331,19 @@ impl LanEngine {
         }
         log::info!("LAN engine listening on port {port}");
         Ok((Self { inner }, rx))
+    }
+
+    /// Lets the app's own UI read a file by range from `127.0.0.1`; returns the URL
+    /// to add `&start=..&end=..` to. Stays registered until the app exits.
+    pub fn register_local_file(&self, size: u64, open: local::Opener) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.inner.local_files.lock().unwrap().insert(id.clone(), local::LocalFile { size, open });
+        format!(
+            "http://127.0.0.1:{}{}/local/files/{id}?token={}",
+            self.inner.port,
+            protocol::API,
+            self.inner.local_token
+        )
     }
 
     pub fn port(&self) -> u16 {

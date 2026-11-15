@@ -1,9 +1,16 @@
 package com.globalsend.nfc
 
+import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.webkit.WebView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
@@ -28,6 +35,31 @@ import java.io.IOException
 class TapPayloadArgs {
   lateinit var template: String
   lateinit var secret: String
+}
+
+@InvokeArg
+class UriArgs {
+  lateinit var uri: String
+}
+
+@InvokeArg
+class TransferStatusArgs {
+  var active: Boolean = false
+  var title: String = ""
+  var text: String = ""
+  var percent: Int = -1
+}
+
+@InvokeArg
+class RequestArgs {
+  lateinit var requestId: String
+  var title: String = ""
+  var text: String = ""
+}
+
+@InvokeArg
+class PresenceArgs {
+  var enabled: Boolean = false
 }
 
 @InvokeArg
@@ -96,6 +128,76 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
+  override fun load(webView: WebView) {
+    // Android 13+: needed to show transfer progress while in the background.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    ) {
+      ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7302)
+    }
+  }
+
+  /** Real file name of a picked content:// URI (the URI itself is often just an id). */
+  @Command
+  fun displayName(invoke: Invoke) {
+    val args = invoke.parseArgs(UriArgs::class.java)
+    val name = try {
+      activity.contentResolver.query(Uri.parse(args.uri), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+        if (it.moveToFirst()) it.getString(0) else null
+      }
+    } catch (e: Exception) {
+      null
+    }
+    invoke.resolve(JSObject().apply { put("name", name) })
+  }
+
+  /** Starts, updates or stops the foreground service that keeps transfers alive. */
+  @Command
+  fun transferStatus(invoke: Invoke) {
+    val args = invoke.parseArgs(TransferStatusArgs::class.java)
+    try {
+      TransferService.transfer = if (args.active) TransferService.Transfer(args.title, args.text, args.percent) else null
+      TransferService.refresh(activity)
+      invoke.resolve()
+    } catch (e: Exception) {
+      // e.g. Android 12+ refuses to start a foreground service from the background.
+      invoke.reject(e.message ?: "Could not start the transfer service")
+    }
+  }
+
+  /** "Stay reachable": keep running in the background so nearby devices can send. */
+  @Command
+  fun setPresence(invoke: Invoke) {
+    val args = invoke.parseArgs(PresenceArgs::class.java)
+    try {
+      TransferService.presence = args.enabled
+      TransferService.refresh(activity)
+      invoke.resolve()
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "Could not change background mode")
+    }
+  }
+
+  /** Accept/Decline notification for an incoming request, only when the app isn't on screen. */
+  @Command
+  fun notifyRequest(invoke: Invoke) {
+    val args = invoke.parseArgs(RequestArgs::class.java)
+    if (!foreground) RequestNotifications.show(activity, args.requestId, args.title, args.text)
+    invoke.resolve()
+  }
+
+  @Command
+  fun cancelRequest(invoke: Invoke) {
+    RequestNotifications.cancel(activity, invoke.parseArgs(RequestArgs::class.java).requestId)
+    invoke.resolve()
+  }
+
+  /** Long-poll used by Rust: resolves with the next notification button press. */
+  @Command
+  fun nextRequestAction(invoke: Invoke) {
+    RequestNotifications.next(invoke)
+  }
+
   /**
    * Moves a received file from the app's private folder into the public
    * Download/GlobalSend folder via MediaStore, so it shows up in Files and
@@ -110,6 +212,12 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
     Thread {
       try {
         val source = File(args.path)
+        val public = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "GlobalSend")
+        if (source.absolutePath.startsWith(public.absolutePath)) {
+          // Already in public Downloads: just tell the media scanner so Photos/Files see it.
+          MediaScannerConnection.scanFile(activity, arrayOf(source.absolutePath), null, null)
+          return@Thread invoke.resolve(JSObject().apply { put("path", "Download/GlobalSend/${source.name}") })
+        }
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase())
           ?: "application/octet-stream"
         val folder = Environment.DIRECTORY_DOWNLOADS + "/GlobalSend"
@@ -142,11 +250,16 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
     }.start()
   }
 
+  /** Whether the app is on screen (then the in-app prompt is enough). */
+  @Volatile private var foreground = true
+
   override fun onResume() {
+    foreground = true
     if (pendingRead != null) enableReader()
   }
 
   override fun onPause() {
+    foreground = false
     // Reader mode is tied to the foreground activity; onResume turns it back on.
     disableReader()
   }

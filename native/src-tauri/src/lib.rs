@@ -13,6 +13,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_gs_nfc::init())
         .setup(|app| {
             let state = tauri::async_runtime::block_on(native::NativeState::start(app.handle()))?;
@@ -23,10 +24,12 @@ pub fn run() {
             commands::device_info,
             commands::app_settings,
             commands::set_device_name,
+            commands::set_stay_reachable,
             commands::set_signaling_id,
             commands::lan_peers,
             commands::lan_refresh,
             commands::lan_send,
+            commands::describe_files,
             commands::lan_send_web,
             commands::lan_push_chunk,
             commands::lan_respond,
