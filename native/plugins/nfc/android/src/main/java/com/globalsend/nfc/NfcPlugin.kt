@@ -59,7 +59,8 @@ class RequestArgs {
 
 @InvokeArg
 class PresenceArgs {
-  var enabled: Boolean = false
+  /** "off", "reachable" or "alwaysAwake". */
+  var mode: String = "off"
 }
 
 @InvokeArg
@@ -165,12 +166,13 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** "Stay reachable": keep running in the background so nearby devices can send. */
+  /** Background mode: keep running so nearby devices can send while the app is closed. */
   @Command
   fun setPresence(invoke: Invoke) {
     val args = invoke.parseArgs(PresenceArgs::class.java)
     try {
-      TransferService.presence = args.enabled
+      TransferService.presence = args.mode != "off"
+      TransferService.awake = args.mode == "alwaysAwake"
       TransferService.refresh(activity)
       invoke.resolve()
     } catch (e: Exception) {

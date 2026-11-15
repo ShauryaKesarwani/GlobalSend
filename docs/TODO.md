@@ -64,6 +64,8 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 - [ ] 🔴 **Offline-first** — UI, icons and fonts bundled in the app and loading instantly with no internet; LAN transfers work without the signaling server; degrade gracefully when the WebSocket can't be reached.
 - [ ] 🟡 **Written protocol spec** — single source of truth for the TS (web) and Rust (app) engines so app ↔ website transfers interoperate.
 
+- [ ] 🟡 **File handling, method D: all sending in Rust** — keep file references (method A, done) and move WebRTC into the Rust engine too (`webrtc-rs` / `str0m`). The page only holds references and shows progress: no loopback file endpoint, no base64 path, and internet transfers keep running in the background like LAN ones. Needs the written protocol spec so app and website stay compatible.
+
 ### Transfer features
 
 > Priority order: LAN discovery/transfer and NFC first, then background + notifications, then the rest.
@@ -92,7 +94,7 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 - [ ] 🟡 **No shared network at all** — LAN needs the same Wi-Fi or a hotspot (works without internet). Phone ↔ phone with no network would need Wi-Fi Direct / Wi-Fi Aware or Bluetooth (Android only; custom plugin).
 - [x] 🔴 **Background transfers on app switch** — Android `dataSync` foreground service (`TransferService`) runs only while a transfer is active, with a partial wake lock and a low-latency Wi-Fi lock, as LocalSend does. iOS: not possible for P2P (~30 s grace only).
 - [x] 🔴 **Transfer progress in notification** — the same service shows "Sending X to Y · N%", updated once a second. Asks for notification permission on Android 13+. iOS Live Activity: optional, later.
-- [x] 🔴 **Always-on presence, KDE Connect style (first step)** — "Stay reachable in background" toggle (Android, off by default, saved in settings): `TransferService` runs as a `connectedDevice` foreground service with a quiet ongoing notification and no wake/Wi-Fi locks while idle.
+- [x] 🔴 **Always-on presence, KDE Connect style (first step)** — Settings → "Run in background" (Android, off by default): **Reachable** = `connectedDevice` foreground service with a quiet ongoing notification, no wake/Wi-Fi locks while idle; **Always awake** = also holds wake + Wi-Fi locks. Plus settings for NFC/LAN auto-accept and the download folder; re-received identical files keep their name.
   - [ ] 🟡 Lower idle cost further: longer announce interval when idle, pause on battery saver / when not on Wi-Fi, start on boot (optional).
   - [ ] 🟡 Check KDE Connect's approach (its sources didn't load for research).
 - [x] 🔴 **Accept from a notification** — Android: heads-up "X wants to send you …" with Accept / Decline buttons when the app isn't on screen; button presses reach Rust through a long-poll, so they work without the page. Windows/desktop: notification + taskbar flash when the window isn't focused; accept in the app window.
@@ -120,6 +122,7 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 
 ## 🟢 Project hygiene
 
+- [x] **Timeline** — milestones (released on `main`, in progress on `feat/mobile-app`, coming next) in the root README.
 - [x] **Agent guide** — root `AGENTS.md` (docs to read, TODO/API/env upkeep, code style, checks); `CLAUDE.md` imports it.
 - [x] **Env samples** — `frontend/.env.example` (now tracked in git) and `backend/.env.example`, with production notes marked `[CHANGED]`.
 - [x] **Add a `LICENSE` file** — README advertises MIT but no license file exists.

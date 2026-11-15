@@ -7,7 +7,7 @@ use std::str::FromStr;
 use globalsend_core::{
     device::{DeviceInfo, Platform},
     lan::{FileSource, LanPeer, OutgoingFile, files::display_name_from_path},
-    settings::normalize_device_name,
+    settings::{BackgroundMode, normalize_device_name},
     tap::TapPayload,
 };
 use serde::Serialize;
@@ -37,8 +37,12 @@ pub struct AppSettings {
     download_dir: String,
     lan_port: u16,
     nfc: NfcStatus,
-    /// Android: keep running in the background so others can send while closed.
-    stay_reachable: bool,
+    /// Android: keep running when the app is closed.
+    background_mode: BackgroundMode,
+    nfc_auto_accept: bool,
+    lan_auto_accept: bool,
+    /// The folder can be changed on desktop; Android always uses Download/GlobalSend.
+    can_change_download_dir: bool,
 }
 
 #[tauri::command]
@@ -51,10 +55,13 @@ pub fn app_settings<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>
         effective_name: settings.device_name.clone().unwrap_or_else(|| info.default_name.clone()),
         default_name: info.default_name,
         platform: info.platform,
-        download_dir: state.download_dir.display().to_string(),
+        download_dir: state.download_dir.lock().unwrap().display().to_string(),
         lan_port: state.engine.port(),
         nfc: app.gs_nfc().status(),
-        stay_reachable: settings.stay_reachable,
+        background_mode: settings.background_mode,
+        nfc_auto_accept: settings.nfc_auto_accept,
+        lan_auto_accept: settings.lan_auto_accept,
+        can_change_download_dir: !cfg!(mobile),
     }
 }
 
@@ -71,14 +78,43 @@ pub fn set_device_name<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeSta
     Ok(name)
 }
 
-/// Turns "Stay reachable in background" on or off (Android foreground service).
-#[tauri::command]
-pub async fn set_stay_reachable<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>, enabled: bool) -> CmdResult<bool> {
-    app.gs_nfc().set_presence(enabled).await.map_err(|e| e.to_string())?;
+fn save_settings(state: &NativeState, change: impl FnOnce(&mut globalsend_core::settings::Settings)) -> CmdResult<()> {
     let mut settings = state.settings.lock().unwrap();
-    settings.stay_reachable = enabled;
+    change(&mut settings);
     settings.save(&state.settings_path).map_err(|e| format!("Could not save settings: {e}"))?;
-    Ok(enabled)
+    state.engine.set_accept_policy(crate::native::accept_policy(&settings));
+    Ok(())
+}
+
+/// Android: off / reachable / always awake (foreground service).
+#[tauri::command]
+pub async fn set_background_mode<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>, mode: BackgroundMode) -> CmdResult<()> {
+    app.gs_nfc().set_presence(crate::native::background_mode_name(mode)).await.map_err(|e| e.to_string())?;
+    save_settings(&state, |s| s.background_mode = mode)
+}
+
+#[tauri::command]
+pub fn set_auto_accept(state: State<'_, NativeState>, nfc: bool, lan: bool) -> CmdResult<()> {
+    save_settings(&state, |s| {
+        s.nfc_auto_accept = nfc;
+        s.lan_auto_accept = lan;
+    })
+}
+
+/// Desktop: change where received files go (`None` = back to the default).
+#[tauri::command]
+pub fn set_download_dir<R: Runtime>(app: AppHandle<R>, state: State<'_, NativeState>, path: Option<String>) -> CmdResult<String> {
+    let dir = match &path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => crate::native::pick_download_dir(&app),
+    };
+    if !crate::native::writable(&dir) {
+        return Err(format!("Can't save files in {}", dir.display()));
+    }
+    save_settings(&state, |s| s.download_dir = path)?;
+    state.engine.set_download_dir(dir.clone());
+    *state.download_dir.lock().unwrap() = dir.clone();
+    Ok(dir.display().to_string())
 }
 
 /// The webview's signaling-server session id (None when offline) and the public
@@ -274,6 +310,9 @@ pub fn nfc_cancel_read<R: Runtime>(app: AppHandle<R>) -> CmdResult<()> {
 /// Burns the token, so call it once per incoming invite.
 #[tauri::command]
 pub fn verify_tap_token(state: State<'_, NativeState>, token: String) -> bool {
+    if !state.settings.lock().unwrap().nfc_auto_accept {
+        return false;
+    }
     match state.tap.verify_and_consume(&token) {
         Ok(()) => true,
         Err(err) => {

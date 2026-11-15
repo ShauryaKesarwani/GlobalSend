@@ -3,6 +3,7 @@
 // Native-app-only controls: device name, LAN "Nearby" devices and NFC tap to
 // connect. Temporary home on the /test page until the real UI design lands.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { native, type AppSettings, type LanEvent, type LanPeer, type TapResult } from "@/lib/native";
 import { applyTransferEvent, type NativeTransfer } from "@/lib/nativeTransfers";
@@ -191,29 +192,6 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
         )}
       </div>
 
-      {settings?.platform === "android" && (
-        <label className="mt-3 flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5 size-4"
-            checked={settings.stayReachable}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              void native.setStayReachable(enabled)
-                .then(() => setSettings((s) => (s ? { ...s, stayReachable: enabled } : s)))
-                .catch((error) => toast.error(errorText(error)));
-            }}
-          />
-          <span>
-            <span className="font-medium text-stone-900">Stay reachable in background</span>
-            <span className="block text-xs text-stone-500">
-              Nearby devices can send you files while the app is closed. You get a notification to accept. Shows a small
-              ongoing notification; uses little battery when idle.
-            </span>
-          </span>
-        </label>
-      )}
-
       {nfc?.supported && (
         <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-3 text-sm">
           {!nfc.enabled ? (
@@ -299,8 +277,9 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
         </div>
       )}
 
-      {requests[0] && (
-        <div role="dialog" aria-live="polite" className="fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-3xl border border-emerald-300/50 bg-stone-950 p-5 text-stone-100 shadow-2xl">
+      {/* Portal: the panel sits inside a blurred card, which would pin "fixed" to the card. */}
+      {requests[0] && createPortal(
+        <div role="dialog" aria-live="polite" className="fixed left-1/2 top-4 z-[80] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-3xl border border-emerald-300/50 bg-stone-950 p-5 text-stone-100 shadow-2xl">
           <div className="font-medium">
             {requests[0].from.alias} wants to send {requests[0].files.length === 1 ? requests[0].files[0].name : `${requests[0].files.length} files`}
           </div>
@@ -309,7 +288,8 @@ export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersCh
             <button onClick={() => respond(requests[0], true)} className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-emerald-950 hover:bg-emerald-400">Accept</button>
             <button onClick={() => respond(requests[0], false)} className="rounded-full border border-stone-500 px-4 py-2 text-sm hover:bg-stone-800">Decline</button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

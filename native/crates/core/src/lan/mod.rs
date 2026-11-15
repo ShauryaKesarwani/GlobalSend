@@ -192,6 +192,7 @@ pub(crate) struct Inner {
     /// Files the local UI may read by range (see `local`), and the token it must send.
     local_files: Mutex<HashMap<String, local::LocalFile>>,
     local_token: String,
+    accept: RwLock<AcceptPolicy>,
     http: reqwest::Client,
     shutdown: watch::Sender<bool>,
     announce_now: Notify,
@@ -266,6 +267,21 @@ impl Inner {
     }
 }
 
+/// When incoming transfers skip the accept prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptPolicy {
+    /// A valid NFC tap token was presented.
+    pub tap: bool,
+    /// Any device on the local network.
+    pub any_lan: bool,
+}
+
+impl Default for AcceptPolicy {
+    fn default() -> Self {
+        Self { tap: true, any_lan: false }
+    }
+}
+
 /// Handle to the running engine. Cheap to clone.
 #[derive(Clone)]
 pub struct LanEngine {
@@ -314,6 +330,7 @@ impl LanEngine {
             outgoing: Mutex::new(HashMap::new()),
             local_files: Mutex::new(HashMap::new()),
             local_token: hex::encode(rand::random::<[u8; 16]>()),
+            accept: RwLock::new(AcceptPolicy::default()),
             http,
             shutdown,
             announce_now: Notify::new(),
@@ -374,6 +391,10 @@ impl LanEngine {
     /// Website origin (e.g. `https://example.com`) for the NFC connect link.
     pub fn set_site_url(&self, site_url: Option<String>) {
         self.inner.local.write().unwrap().site_url = site_url;
+    }
+
+    pub fn set_accept_policy(&self, policy: AcceptPolicy) {
+        *self.inner.accept.write().unwrap() = policy;
     }
 
     pub fn set_download_dir(&self, dir: PathBuf) {

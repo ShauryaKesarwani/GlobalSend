@@ -89,8 +89,8 @@ mod android {
     }
 
     #[derive(Serialize)]
-    struct PresenceArgs {
-        enabled: bool,
+    struct PresenceArgs<'a> {
+        mode: &'a str,
     }
 
     #[derive(Serialize)]
@@ -152,9 +152,9 @@ mod android {
                 .map_err(err)
         }
 
-        /// "Stay reachable": keep the app alive in the background (foreground service).
-        pub async fn set_presence(&self, enabled: bool) -> Result<()> {
-            self.0.run_mobile_plugin_async::<()>("setPresence", PresenceArgs { enabled }).await.map_err(err)
+        /// Background mode: "off", "reachable" or "alwaysAwake" (foreground service).
+        pub async fn set_presence(&self, mode: &str) -> Result<()> {
+            self.0.run_mobile_plugin_async::<()>("setPresence", PresenceArgs { mode }).await.map_err(err)
         }
 
         /// Accept/Decline notification for an incoming request (skipped while the app is on screen).
@@ -220,7 +220,7 @@ mod fallback {
             None
         }
         /// Desktop apps keep running in the background on their own.
-        pub async fn set_presence(&self, _enabled: bool) -> Result<()> {
+        pub async fn set_presence(&self, _mode: &str) -> Result<()> {
             Ok(())
         }
         /// Desktop notifications are handled by the app (tauri-plugin-notification).

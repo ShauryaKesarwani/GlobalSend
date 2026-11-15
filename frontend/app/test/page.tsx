@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { NativePanel } from "@/components/NativePanel";
+import { NativeSettings } from "@/components/NativeSettings";
 import { PeerQrCode } from "@/components/PeerQrCode";
 import { TransferDock } from "@/components/TransferDock";
 import {
@@ -819,6 +820,7 @@ export default function TransferTestPage() {
           </div>
         </aside>
       </div>
+      {nativeApp && <NativeSettings />}
       {draggingFiles && (
         <div className="pointer-events-none fixed inset-0 z-[60] bg-stone-950/60 p-4 sm:p-6" aria-hidden="true">
           <div className="flex h-full items-center justify-center rounded-3xl border-2 border-dashed border-orange-400 bg-orange-50/95 p-6 text-center text-stone-900">

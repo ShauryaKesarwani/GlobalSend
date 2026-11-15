@@ -34,11 +34,18 @@ native/
 - **Background (Android):** while any transfer runs, `TransferService` (a `dataSync` foreground
   service) shows a progress notification and holds a CPU wake lock + low-latency Wi-Fi lock, so
   switching apps or turning the screen off doesn't stop it. It stops when transfers finish.
+- **Settings (round button, top right in the app):** background mode on Android (Off / Reachable /
+  Always awake), auto-accept after an NFC tap (default on) or from anyone on the LAN (default off),
+  and the download folder (changeable on desktop). Stored in `settings.json`; the LAN engine applies
+  the auto-accept rules itself (`AcceptPolicy`).
+- **Same name again:** if a received file's name already exists and the contents are identical,
+  the duplicate is dropped and the name kept. Different contents get `name (1).ext`; nothing is
+  overwritten.
 - **Incoming requests while in the background:** Android shows a notification with Accept /
   Decline (Rust gets the button press directly). Desktop shows a notification and flashes the
   taskbar. On Android the app must still be alive to receive: Android freezes background apps,
-  so turn on **Stay reachable in background** (runs `TransferService` as a `connectedDevice`
-  foreground service with an ongoing notification, no wake locks while idle).
+  so pick a background mode in Settings: **Reachable** (`connectedDevice` foreground service,
+  ongoing notification, no wake locks while idle) or **Always awake** (also holds wake + Wi-Fi locks).
 - **`tauri android dev`** loads the page through `tauri.localhost`; Next's hot-reload WebSocket
   fails there. For real testing, build and install the APK (`bun run android:build -- --debug
   --apk --target aarch64`).

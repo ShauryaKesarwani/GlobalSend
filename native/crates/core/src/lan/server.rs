@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -123,14 +123,17 @@ async fn prepare(
     inner.upsert_peer(peer.clone());
     let total_size = req.files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
 
-    let auto_accepted = match req.tap_token.as_deref().map(|t| inner.tap.verify_and_consume(t)) {
-        Some(Ok(())) => true,
-        Some(Err(err)) => {
-            log::info!("tap token from {} rejected ({err}); asking the user", peer.alias);
-            false
-        }
-        None => false,
-    };
+    let policy = *inner.accept.read().unwrap();
+    let tapped = policy.tap
+        && match req.tap_token.as_deref().map(|t| inner.tap.verify_and_consume(t)) {
+            Some(Ok(())) => true,
+            Some(Err(err)) => {
+                log::info!("tap token from {} rejected ({err}); asking the user", peer.alias);
+                false
+            }
+            None => false,
+        };
+    let auto_accepted = tapped || policy.any_lan;
 
     if !auto_accepted {
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -161,7 +164,9 @@ async fn prepare(
         .iter()
         .map(|meta| {
             let name = sanitize_file_name(&meta.name);
-            let dest = unique_path(&dir, &name, &taken);
+            // The final name is decided when the file is complete (see `place_file`);
+            // here we only keep names unique within this transfer.
+            let dest = if taken.contains(&dir.join(&name)) { unique_path(&dir, &name, &taken) } else { dir.join(&name) };
             taken.push(dest.clone());
             (meta.id.clone(), ReceiveFile { name, dest, size: meta.size, state: FileState::Pending })
         })
@@ -259,9 +264,11 @@ async fn receive_file(
     expected: u64,
     body: Body,
 ) -> Result<PathBuf, (StatusCode, String)> {
+    // Unique per upload so two transfers of the same name can't collide.
     let part = dest.with_file_name(format!(
-        "{}{PART_SUFFIX}",
-        dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+        "{}.{}{PART_SUFFIX}",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
     ));
     let io_err = |err: std::io::Error| (StatusCode::INTERNAL_SERVER_ERROR, format!("disk error: {err}"));
     let mut out = tokio::fs::File::create(&part).await.map_err(io_err)?;
@@ -308,16 +315,50 @@ async fn receive_file(
         let _ = tokio::fs::remove_file(&part).await;
         return Err(err);
     }
-    // Another app may have created the name meanwhile; never overwrite.
-    let final_path = if tokio::fs::try_exists(dest).await.unwrap_or(false) {
+    let (part, dest) = (part, dest.clone());
+    tokio::task::spawn_blocking(move || place_file(&part, &dest))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(io_err)
+}
+
+/// Moves a finished upload to its final name. If a file with that name already
+/// exists and is identical (the same file sent again), the copy is dropped and
+/// the original name kept. Different contents get "name (1).ext"; nothing is
+/// ever overwritten.
+fn place_file(part: &Path, dest: &Path) -> std::io::Result<PathBuf> {
+    if dest.exists() {
+        if same_contents(part, dest)? {
+            std::fs::remove_file(part)?;
+            return Ok(dest.to_path_buf());
+        }
         let dir = dest.parent().map(PathBuf::from).unwrap_or_default();
-        let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_owned();
-        unique_path(&dir, &name, &[])
-    } else {
-        dest.clone()
-    };
-    tokio::fs::rename(&part, &final_path).await.map_err(io_err)?;
-    Ok(final_path)
+        let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let free = unique_path(&dir, name, &[]);
+        std::fs::rename(part, &free)?;
+        return Ok(free);
+    }
+    std::fs::rename(part, dest)?;
+    Ok(dest.to_path_buf())
+}
+
+fn same_contents(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    if std::fs::metadata(a)?.len() != std::fs::metadata(b)?.len() {
+        return Ok(false);
+    }
+    let (mut a, mut b) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    let (mut buf_a, mut buf_b) = (vec![0u8; 1 << 20], vec![0u8; 1 << 20]);
+    loop {
+        let n = a.read(&mut buf_a)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        b.read_exact(&mut buf_b[..n])?;
+        if buf_a[..n] != buf_b[..n] {
+            return Ok(false);
+        }
+    }
 }
 
 async fn cancel(State(inner): State<Arc<Inner>>, Query(q): Query<SessionQuery>) -> StatusCode {

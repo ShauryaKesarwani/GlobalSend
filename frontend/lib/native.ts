@@ -5,6 +5,8 @@ import { NativeFile, type NativeFileInfo } from "./sendableFile";
 
 export type Platform = "android" | "ios" | "windows" | "macos" | "linux" | "unknown";
 
+export type BackgroundMode = "off" | "reachable" | "alwaysAwake";
+
 export type NfcStatus = { supported: boolean; enabled: boolean; cardEmulation: boolean };
 
 export type AppSettings = {
@@ -16,8 +18,11 @@ export type AppSettings = {
   downloadDir: string;
   lanPort: number;
   nfc: NfcStatus;
-  /** Android: keep running in the background so others can send while closed. */
-  stayReachable: boolean;
+  /** Android: keep running when the app is closed. */
+  backgroundMode: BackgroundMode;
+  nfcAutoAccept: boolean;
+  lanAutoAccept: boolean;
+  canChangeDownloadDir: boolean;
 };
 
 export type LanPeer = {
@@ -98,7 +103,15 @@ export async function pushFiles(
 export const native = {
   settings: () => call<AppSettings>("app_settings"),
   setDeviceName: (name: string) => call<string>("set_device_name", { name }),
-  setStayReachable: (enabled: boolean) => call<boolean>("set_stay_reachable", { enabled }),
+  setBackgroundMode: (mode: BackgroundMode) => call<void>("set_background_mode", { mode }),
+  setAutoAccept: (nfc: boolean, lan: boolean) => call<void>("set_auto_accept", { nfc, lan }),
+  /** `null` resets to the default folder. Returns the folder now in use. */
+  setDownloadDir: (path: string | null) => call<string>("set_download_dir", { path }),
+  async pickFolder(): Promise<string | null> {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const picked = await open({ directory: true, multiple: false });
+    return typeof picked === "string" ? picked : null;
+  },
   setSignalingId: (id: string | null, siteUrl?: string) =>
     call<void>("set_signaling_id", { id, siteUrl: siteUrl || null }),
   lanPeers: () => call<LanPeer[]>("lan_peers"),

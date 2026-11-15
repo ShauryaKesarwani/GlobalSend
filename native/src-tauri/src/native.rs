@@ -9,8 +9,8 @@ use std::{
 
 use globalsend_core::{
     device::DeviceInfo,
-    lan::{Direction, LanConfig, LanEngine, LanEvent},
-    settings::Settings,
+    lan::{AcceptPolicy, Direction, LanConfig, LanEngine, LanEvent},
+    settings::{BackgroundMode, Settings},
     tap::TapAuth,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -26,7 +26,7 @@ pub struct NativeState {
     pub tap: Arc<TapAuth>,
     pub settings: Mutex<Settings>,
     pub settings_path: PathBuf,
-    pub download_dir: PathBuf,
+    pub download_dir: Mutex<PathBuf>,
     /// Chunk senders for files the web UI streams in, keyed by (transfer id, file index).
     pub uploads: Mutex<HashMap<(String, usize), tokio::sync::mpsc::Sender<Vec<u8>>>>,
 }
@@ -36,7 +36,12 @@ impl NativeState {
         let settings_path = app.path().app_config_dir()?.join("settings.json");
         let settings = Settings::load_or_create(&settings_path)?;
         let alias = settings.device_name.clone().unwrap_or_else(|| DeviceInfo::current().default_name);
-        let download_dir = pick_download_dir(app);
+        let download_dir = settings
+            .download_dir
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(writable)
+            .unwrap_or_else(|| pick_download_dir(app));
         log::info!("received files go to {}", download_dir.display());
 
         if let Err(err) = app.gs_nfc().acquire_multicast_lock() {
@@ -46,6 +51,7 @@ impl NativeState {
         let tap = Arc::new(TapAuth::new());
         let config = LanConfig::new(settings.device_id.clone(), alias, download_dir.clone());
         let (engine, mut events) = LanEngine::start(config, tap.clone()).await?;
+        engine.set_accept_policy(accept_policy(&settings));
 
         let emitter = app.clone();
         let status = transfer_status_task(app.clone());
@@ -83,16 +89,17 @@ impl NativeState {
             tap,
             settings: Mutex::new(settings),
             settings_path,
-            download_dir,
+            download_dir: Mutex::new(download_dir),
             uploads: Mutex::new(HashMap::new()),
         };
         state.sync_tap_payload(app);
         spawn_request_action_loop(app.clone());
-        if state.settings.lock().unwrap().stay_reachable {
+        let mode = state.settings.lock().unwrap().background_mode;
+        if mode != BackgroundMode::Off {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = app.gs_nfc().set_presence(true).await {
-                    log::warn!("could not stay reachable in background: {err}");
+                if let Err(err) = app.gs_nfc().set_presence(background_mode_name(mode)).await {
+                    log::warn!("could not keep running in background: {err}");
                 }
             });
         }
@@ -122,10 +129,30 @@ impl NativeState {
     }
 }
 
+pub fn accept_policy(settings: &Settings) -> AcceptPolicy {
+    AcceptPolicy { tap: settings.nfc_auto_accept, any_lan: settings.lan_auto_accept }
+}
+
+pub fn background_mode_name(mode: BackgroundMode) -> &'static str {
+    match mode {
+        BackgroundMode::Off => "off",
+        BackgroundMode::Reachable => "reachable",
+        BackgroundMode::AlwaysAwake => "alwaysAwake",
+    }
+}
+
+/// Creates `dir` if needed and checks we can write into it.
+pub fn writable(dir: &PathBuf) -> bool {
+    let probe = dir.join(".globalsend-write-test");
+    let ok = std::fs::create_dir_all(dir).is_ok() && std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
 /// First writable of: public Download/GlobalSend (Android 11+ allows writing
 /// there directly, as LocalSend does), the platform's Downloads/GlobalSend, and
 /// finally the app's own data folder.
-fn pick_download_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+pub fn pick_download_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     let mut candidates = Vec::new();
     if cfg!(target_os = "android") {
         let storage = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/storage/emulated/0".into());
@@ -134,12 +161,6 @@ fn pick_download_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     if let Ok(downloads) = app.path().download_dir() {
         candidates.push(downloads.join("GlobalSend"));
     }
-    let writable = |dir: &PathBuf| {
-        let probe = dir.join(".globalsend-write-test");
-        let ok = std::fs::create_dir_all(dir).is_ok() && std::fs::write(&probe, b"").is_ok();
-        let _ = std::fs::remove_file(&probe);
-        ok
-    };
     candidates.into_iter().find(writable).unwrap_or_else(|| {
         app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("received")
     })

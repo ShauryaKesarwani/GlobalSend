@@ -18,9 +18,10 @@ import androidx.core.app.NotificationCompat
  * Keeps the app process alive so Android doesn't freeze it in the background.
  * Runs in two situations, each optional:
  *
- * - **Presence** (user setting "Stay reachable"): stays visible to nearby
+ * - **Presence** (setting "Run in background"): stays visible to nearby
  *   devices and able to receive while the app is closed, like KDE Connect.
- *   Holds no wake or Wi-Fi lock, so idle cost is low.
+ *   "Reachable" holds no wake or Wi-Fi lock, so idle cost is low; "Always
+ *   awake" holds both for instant answers at a higher battery cost.
  * - **Transfer**: while files are being sent or received. Shows progress and
  *   holds a CPU wake lock plus a low-latency Wi-Fi lock (Wi-Fi power saving
  *   otherwise slows LAN transfers a lot).
@@ -52,7 +53,8 @@ class TransferService : Service() {
     } else {
       startForeground(NOTIFICATION_ID, notification)
     }
-    if (current != null) acquireLocks() else releaseLocks()
+    // Locks cost battery: only during transfers, or always in "always awake" mode.
+    if (current != null || awake) acquireLocks() else releaseLocks()
     // Restart in presence mode if the system kills us.
     return if (presence) START_STICKY else START_NOT_STICKY
   }
@@ -90,6 +92,8 @@ class TransferService : Service() {
     private const val CHANNEL_ID = "transfers"
 
     @Volatile var presence = false
+    /** "Always awake" background mode: hold the wake and Wi-Fi locks even when idle. */
+    @Volatile var awake = false
     @Volatile var transfer: Transfer? = null
 
     /** Applies the current [presence] / [transfer] state: start, update or stop. */

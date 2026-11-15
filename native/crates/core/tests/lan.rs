@@ -9,7 +9,7 @@ use std::{
 
 use globalsend_core::{
     device::Platform,
-    lan::{Direction, FileSource, LanConfig, LanEngine, LanEvent, OutgoingFile},
+    lan::{AcceptPolicy, Direction, FileSource, LanConfig, LanEngine, LanEvent, OutgoingFile},
     tap::TapAuth,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -130,7 +130,7 @@ async fn without_token_receiver_is_asked() {
     assert!(!ok);
     assert_eq!(err.as_deref(), Some("declined"));
 
-    // Accepted, and a name collision gets a suffix instead of overwriting.
+    // Accepted, and a name collision with different contents gets a suffix instead of overwriting.
     let received = b.dir.path().join("received");
     std::fs::create_dir_all(&received).unwrap();
     std::fs::write(received.join("y.txt"), b"old").unwrap();
@@ -236,4 +236,42 @@ async fn local_ui_reads_registered_files_by_range() {
     let bad_token = url.replace("token=", "token=x");
     assert_eq!(get(format!("{bad_token}&start=0&end=1")).await.status(), 403);
     assert_eq!(get(format!("{url}&start=5&end=2")).await.status(), 416);
+}
+
+/// Sending the same file again keeps its name instead of making "name (1)".
+#[tokio::test]
+async fn identical_resend_keeps_the_original_name() {
+    let mut a = node("alpha", None).await;
+    let mut b = node("bravo", None).await;
+    a.engine.probe(addr(&b), None).await.unwrap();
+    for _ in 0..2 {
+        a.engine.send_files(&b.id, vec![outgoing(a.dir.path(), "same.txt", b"same bytes")], Some(b.tap.issue())).unwrap();
+        let (ok, err) = finished(&next_matching(&mut b.events, |e| finished(e, Direction::Receive).is_some()).await, Direction::Receive).unwrap();
+        assert!(ok, "{err:?}");
+    }
+    let names: Vec<_> = std::fs::read_dir(b.dir.path().join("received")).unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, vec!["same.txt"]);
+    let _ = &mut a;
+}
+
+/// The user's auto-accept settings decide whether the prompt appears.
+#[tokio::test]
+async fn accept_policy_controls_the_prompt() {
+    let a = node("alpha", None).await;
+    let mut b = node("bravo", None).await;
+    a.engine.probe(addr(&b), None).await.unwrap();
+    let first = |e: &LanEvent| matches!(e, LanEvent::IncomingRequest { .. } | LanEvent::TransferStarted { .. });
+
+    // NFC auto-accept turned off: a valid tap still asks.
+    b.engine.set_accept_policy(AcceptPolicy { tap: false, any_lan: false });
+    a.engine.send_files(&b.id, vec![outgoing(a.dir.path(), "p.txt", b"p")], Some(b.tap.issue())).unwrap();
+    let LanEvent::IncomingRequest { request_id, .. } = next_matching(&mut b.events, first).await else { panic!("expected a prompt") };
+    b.engine.respond(&request_id, false);
+
+    // Auto-accept everything on the LAN: no prompt, no token needed.
+    b.engine.set_accept_policy(AcceptPolicy { tap: true, any_lan: true });
+    a.engine.send_files(&b.id, vec![outgoing(a.dir.path(), "q.txt", b"q")], None).unwrap();
+    let event = next_matching(&mut b.events, first).await;
+    assert!(matches!(event, LanEvent::TransferStarted { auto_accepted: true, .. }), "got {event:?}");
 }
