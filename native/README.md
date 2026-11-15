@@ -20,7 +20,16 @@ native/
   Peers drop out after 35 s of silence, or immediately when the app quits. See
   `crates/core/src/lan/protocol.rs` for the wire format.
 - **Sending on LAN:** `prepare` → receiver accepts (prompt) → `upload` per file, streamed from
-  disk to disk. Files land in `Downloads/GlobalSend` (falls back to the app's data folder).
+  disk to disk. Files selected in the page (picker, drag-and-drop, share) have no path, so the
+  page pushes them to Rust in 512 KiB base64 chunks (`lan_send_web` + `lan_push_chunk`). At most
+  4 chunks wait in memory per file. Base64 because Android's Tauri IPC carries text only: raw
+  byte payloads arrive as JSON number arrays there.
+- **Where received files go:** desktop: `Downloads/GlobalSend`. Android: received into the app's
+  private folder, then moved into the public `Download/GlobalSend` via MediaStore (Android 10+),
+  so they show in Files and Photos. Android 8–9 keep the private copy.
+- **`tauri android dev`** loads the page through `tauri.localhost`; Next's hot-reload WebSocket
+  fails there. For real testing, build and install the APK (`bun run android:build -- --debug
+  --apk --target aarch64`). Files land in `Downloads/GlobalSend` (falls back to the app's data folder).
 - **Tap to send (Android):** the receiving phone acts as an NFC tag whenever it's unlocked
   and the app process is alive. A tap hands the sender the receiver's name, IPs, port,
   signaling id and a single-use token valid for 2 minutes. If the receiver answers on the
@@ -73,6 +82,34 @@ bun run build      # static-exports the frontend and builds installers
    The Next dev server listens on `0.0.0.0:3000` so the phone can reach it over Wi-Fi.
 
 iOS needs a Mac with Xcode (`tauri ios init` / `tauri ios dev`).
+
+**Windows gotchas (hit on this machine):**
+- Turn on Windows **Developer Mode**. Tauri symlinks the Rust library into the Android
+  project and Windows blocks symlinks otherwise ("Creation symbolic link is not allowed").
+- `gen/android/gradle.properties` sets `java.net.preferIPv4Stack=true` and the wrapper has a
+  120 s `networkTimeout`. Java tried IPv6 to GitHub's download servers here and timed out.
+- Use only the SDK's `adb` (`android-sdk/platform-tools`). Other copies (scrcpy, old
+  platform-tools) restart the adb server and drop wireless debugging.
+
+## Testing on a phone and a PC (no deploy needed)
+
+**Same Wi-Fi (everything except Web NFC):**
+
+1. `frontend/.env.local`: `NEXT_PUBLIC_API_URL=http://<PC LAN IP>:4000`
+2. `cd backend && bun run src/index.ts` and `cd frontend && bun run dev:tauri`
+3. Open `http://<PC LAN IP>:3000/test` on the PC and the phone. The app (`bun run dev` /
+   `bun run android:dev` here) uses the same backend.
+
+**Web NFC (needs HTTPS for both page and backend), with Tailscale Funnel:**
+
+```bash
+tailscale funnel --bg 3000                # frontend → https://<machine>.<tailnet>.ts.net
+tailscale funnel --bg --https=8443 4000   # backend  → https://<machine>.<tailnet>.ts.net:8443
+```
+
+Then in `frontend/.env.local` set `NEXT_PUBLIC_API_URL=https://<machine>.<tailnet>.ts.net:8443`
+and `NEXT_PUBLIC_SITE_URL=https://<machine>.<tailnet>.ts.net`, and restart the frontend and the app.
+`tailscale funnel reset` turns it off. Locally every client counts as "Nearby".
 
 ## Notes
 

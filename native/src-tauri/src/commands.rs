@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use globalsend_core::{
     device::{DeviceInfo, Platform},
-    lan::{LanPeer, OutgoingFile, files::display_name_from_path},
+    lan::{FileSource, LanPeer, OutgoingFile, files::display_name_from_path},
     settings::normalize_device_name,
     tap::TapPayload,
 };
@@ -110,9 +110,68 @@ pub fn lan_send<R: Runtime>(
         let file = app.fs().open(file_path, options).map_err(|e| format!("Could not open {path}: {e}"))?;
         let size = file.metadata().map_err(|e| format!("Could not read {path}: {e}"))?.len();
         let name = display_name_from_path(path);
-        files.push(OutgoingFile { mime_type: guess_mime(&name).to_owned(), name, size, file });
+        files.push(OutgoingFile { mime_type: guess_mime(&name).to_owned(), name, size, source: FileSource::Disk(file) });
     }
     state.engine.send_files(&peer_id, files, tap_token).map_err(|e| e.to_string())
+}
+
+/// How many pushed chunks may wait in memory per file before the web UI has to wait.
+const BUFFERED_CHUNKS: usize = 4;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebFile {
+    name: String,
+    size: u64,
+    mime_type: String,
+}
+
+/// Sends files the web UI holds as `File` objects (picked in the page, dropped or
+/// shared), which have no path. The page then pushes each file's bytes in order
+/// with `lan_push_chunk`; the bounded channel keeps memory flat.
+#[tauri::command]
+pub fn lan_send_web(
+    state: State<'_, NativeState>,
+    peer_id: String,
+    files: Vec<WebFile>,
+    tap_token: Option<String>,
+) -> CmdResult<String> {
+    let (outgoing, senders): (Vec<_>, Vec<_>) = files
+        .into_iter()
+        .map(|f| OutgoingFile::stream(f.name, f.size, f.mime_type, BUFFERED_CHUNKS))
+        .unzip();
+    let transfer_id = state.engine.send_files(&peer_id, outgoing, tap_token).map_err(|e| e.to_string())?;
+    let mut uploads = state.uploads.lock().unwrap();
+    for (index, sender) in senders.into_iter().enumerate() {
+        uploads.insert((transfer_id.clone(), index), sender);
+    }
+    Ok(transfer_id)
+}
+
+/// One chunk of a `lan_send_web` file, base64-encoded. An empty chunk ends the
+/// file. Base64 in normal arguments because Android's IPC carries text only
+/// (raw byte bodies arrive as JSON number arrays there). Errors once the
+/// transfer is gone (declined, cancelled, failed) so the page stops reading.
+#[tauri::command]
+pub async fn lan_push_chunk(
+    state: State<'_, NativeState>,
+    transfer_id: String,
+    file_index: usize,
+    data: String,
+) -> CmdResult<()> {
+    use base64::Engine as _;
+    let key = (transfer_id, file_index);
+    if data.is_empty() {
+        state.uploads.lock().unwrap().remove(&key); // dropping the sender ends the file
+        return Ok(());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| format!("bad chunk: {e}"))?;
+    let sender = state.uploads.lock().unwrap().get(&key).cloned().ok_or("transfer is no longer active")?;
+    if sender.send(bytes).await.is_err() {
+        state.uploads.lock().unwrap().retain(|(id, _), _| *id != key.0);
+        return Err("transfer is no longer active".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]

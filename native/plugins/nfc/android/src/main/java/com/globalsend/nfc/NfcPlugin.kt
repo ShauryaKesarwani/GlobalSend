@@ -1,13 +1,18 @@
 package com.globalsend.nfc
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.webkit.MimeTypeMap
 import app.tauri.Logger
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -16,12 +21,19 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 
 @InvokeArg
 class TapPayloadArgs {
   lateinit var template: String
   lateinit var secret: String
+}
+
+@InvokeArg
+class PublishArgs {
+  lateinit var path: String
+  lateinit var name: String
 }
 
 @TauriPlugin
@@ -82,6 +94,52 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
       }
     }
     invoke.resolve()
+  }
+
+  /**
+   * Moves a received file from the app's private folder into the public
+   * Download/GlobalSend folder via MediaStore, so it shows up in Files and
+   * Photos. Needs Android 10+; older versions keep the private copy.
+   */
+  @Command
+  fun publishDownload(invoke: Invoke) {
+    val args = invoke.parseArgs(PublishArgs::class.java)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+      return invoke.resolve(JSObject().apply { put("path", args.path) })
+    }
+    Thread {
+      try {
+        val source = File(args.path)
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase())
+          ?: "application/octet-stream"
+        val folder = Environment.DIRECTORY_DOWNLOADS + "/GlobalSend"
+        val resolver = activity.contentResolver
+        val values = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, args.name)
+          put(MediaStore.MediaColumns.MIME_TYPE, mime)
+          put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+          put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+          ?: throw IOException("Could not create the file in Downloads")
+        try {
+          resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out, 1 shl 20) } }
+            ?: throw IOException("Could not write to Downloads")
+          resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        } catch (e: Exception) {
+          resolver.delete(uri, null, null)
+          throw e
+        }
+        source.delete()
+        // MediaStore may have renamed it to avoid a clash ("photo (1).jpg").
+        val savedName = resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use {
+          if (it.moveToFirst()) it.getString(0) else null
+        } ?: args.name
+        invoke.resolve(JSObject().apply { put("path", "$folder/$savedName") })
+      } catch (e: Exception) {
+        invoke.reject(e.message ?: "Could not save to Downloads")
+      }
+    }.start()
   }
 
   override fun onResume() {

@@ -5,6 +5,7 @@ import {
 import { transferShardCount, wsUrl } from "@/src/config";
 import { openReceiveSink, type ReceiveSink } from "@/lib/receiveStorage";
 import { fetchIceConfig } from "@/webrtc/iceConfig";
+import { randomId } from "@/lib/randomId";
 
 /** `nearby`: same network as us (per the signaling server), so WebRTC goes direct over LAN. */
 type Peer = { id: string; alias: string; nearby?: boolean };
@@ -177,7 +178,7 @@ export class PeerConnectionGroup {
       ...openShards.map(([, shard]) => shard.getChunkSize()),
     );
     const chunkCount = Math.max(1, Math.ceil(file.size / chunkSize));
-    const transferId = crypto.randomUUID();
+    const transferId = randomId();
     const manifest: FileManifest = {
       kind: "file-meta",
       id: transferId,

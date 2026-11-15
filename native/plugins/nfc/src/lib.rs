@@ -54,6 +54,17 @@ mod android {
         payload: String,
     }
 
+    #[derive(Serialize)]
+    struct PublishArgs<'a> {
+        path: &'a str,
+        name: &'a str,
+    }
+
+    #[derive(Deserialize)]
+    struct PublishResponse {
+        path: String,
+    }
+
     fn err(e: impl std::fmt::Display) -> Error {
         Error::Plugin(e.to_string())
     }
@@ -88,6 +99,16 @@ mod android {
         pub fn acquire_multicast_lock(&self) -> Result<()> {
             self.0.run_mobile_plugin::<()>("acquireMulticastLock", ()).map_err(err)
         }
+
+        /// Moves a received file into the public Download/GlobalSend folder.
+        /// Returns the user-facing location.
+        pub async fn publish_download(&self, path: &str, name: &str) -> Result<String> {
+            self.0
+                .run_mobile_plugin_async::<PublishResponse>("publishDownload", PublishArgs { path, name })
+                .await
+                .map(|r| r.path)
+                .map_err(err)
+        }
     }
 }
 
@@ -113,6 +134,10 @@ mod fallback {
         /// Desktop OSes deliver multicast without a lock.
         pub fn acquire_multicast_lock(&self) -> Result<()> {
             Ok(())
+        }
+        /// Desktop already saves straight into Downloads/GlobalSend.
+        pub async fn publish_download(&self, path: &str, _name: &str) -> Result<String> {
+            Ok(path.to_owned())
         }
     }
 }

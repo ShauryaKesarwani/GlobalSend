@@ -69,11 +69,14 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 > Priority order: LAN discovery/transfer and NFC first, then background + notifications, then the rest.
 
 - [x] 🔴 **LAN discovery + transfer (GlobalSend protocol v1)** — UDP multicast `224.0.0.167:53318` + HTTP on port 53318 (`native/crates/core/src/lan/`). Devices with the app open or in the background appear under "Nearby"; prompt to accept, streaming to `Downloads/GlobalSend`, no overwrite, cancel. Website peers that are also on the LAN are listed under Nearby instead. Android `MulticastLock` in `plugins/nfc`. Covered by `crates/core/tests/lan.rs`.
+  - [x] 🐛 Fixed: app crashed on LAN send (`tokio::spawn` from a sync command on the main thread); the engine now spawns on its own runtime handle. Regression test in `tests/lan.rs`.
+  - [x] Nearby/tap "Send" uses the files already selected in the page (streamed in 1 MiB chunks over IPC) instead of opening a second picker.
+  - [ ] 🔴 Verify on the Pixel: LAN send phone ↔ PC with page-selected files; `tauri android dev` connecting to the backend (assets now load straight from the dev host via `assetPrefix`).
   - [ ] 🔴 Test on two real phones + a PC on the same Wi-Fi (Windows asks for firewall access on first launch — allow private networks).
   - [ ] 🟡 Encrypt LAN traffic: HTTPS with self-signed certs pinned via the announcement (currently plain HTTP).
   - [x] **Browser "Nearby"** — browsers can't multicast or run a server, so the signaling server marks peers on the same network (public IPv4 / IPv6 /64, never sent to clients) with `nearby: true`; the page shows a Nearby badge and lists them first, and WebRTC connects them directly over the LAN. Needs internet. `backend/src/presence/network.ts`.
   - [ ] 🔴 Production: set `NODE_ENV=production` and `TRUST_PROXY=1` (Caddy on the Oracle VPS) on the backend — see `backend/.env.example`. Set `NEXT_PUBLIC_SITE_URL` for the app build — see `frontend/.env.example`.
-  - Browser limits (by design, not fixing): needs internet to reach the signaling server; two tabs on one PC with Wi-Fi off can't connect (browsers never use loopback for WebRTC). Use the native app for offline LAN.
+  - Browser limits (by design, not fixing): needs internet to reach the signaling server; two tabs on one PC with Wi-Fi off can't connect (browsers never use loopback for WebRTC). Use the native app for offline LAN. Over plain `http://<LAN IP>` (local testing) browsers also disable secure-context APIs: `crypto.randomUUID` (now polyfilled in `lib/randomId.ts`), disk staging for big received files (falls back to RAM), clipboard and the service worker. Use HTTPS (deployed site or Tailscale Funnel) for real use.
   - [ ] 🟢 Offline browser LAN (Snapdrop-style): the native app could serve the web UI + signaling on the LAN so browsers on the same Wi-Fi work without internet.
   - [ ] 🟡 iOS: Local Network usage string + multicast entitlement request to Apple.
   - [ ] 🟡 **LocalSend compatibility** — second listener on `224.0.0.167:53317` speaking LocalSend v2 (HTTPS), so we show up in LocalSend and vice versa. Protocol shape already mirrors it.
@@ -83,7 +86,8 @@ Legend: 🔴 high priority · 🟡 medium · 🟢 nice-to-have · 🐛 bug/clean
 - [ ] 🟡 **Internet transfers with website users** — WebRTC in Rust (`webrtc-rs`) speaking the same signaling/protocol as the web app.
 - [ ] 🔴 **NFC tap to connect** — tap exchanges pairing info only, data goes over Wi-Fi. Android ↔ Android via HCE (one phone emulates a tag, custom Kotlin plugin) + reader (official `plugin-nfc`). iPhone can read only. QR stays the fallback.
   - [x] Implemented (untested on hardware): receiver's HCE service (`plugins/nfc/android`) returns name/IPs/port/signaling id + a single-use HMAC token (2 min); sender reads it in reader mode. Same LAN → LAN transfer with no accept prompt; otherwise WebRTC invite carrying `nfcToken`, auto-accepted after `verify_tap_token`. Locked phones don't answer.
-  - [ ] 🔴 Build on Android and test phone ↔ phone (needs Android SDK/NDK; Kotlin hasn't been compiled yet).
+  - [x] Android debug APK builds; NFC plugin Kotlin compiles and its HCE service is in the merged manifest.
+  - [ ] 🔴 Test phone ↔ phone on hardware (Pixel 7 + second phone).
   - [ ] 🟡 iPhone as sender: Core NFC ISO 7816 reader for AID `F0474C53454E4401` (needs Mac + entitlement).
   - [x] **Browser tap (Web NFC, Chrome on Android)** — the app's HCE service also emulates a standard NFC Type 4 NDEF tag holding a one-time link `…/test?connectTo=<ws>&alias=…&nfcToken=…`. The website's "Tap phone (NFC)" button reads it and sends a WebRTC invite with the token, so the app auto-accepts. Phones without the app or site open just open the link and connect the same way. Browsers can only read, not be tapped. Needs `NEXT_PUBLIC_SITE_URL` in the app build and the receiver online.
   - [ ] 🔴 Test Web NFC + "no app" tap on real phones (Kotlin still uncompiled). If another installed app also emulates NDEF, Android may ask which one to use.

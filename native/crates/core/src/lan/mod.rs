@@ -124,13 +124,31 @@ pub enum LanEvent {
     TransferFinished { transfer_id: String, direction: Direction, ok: bool, error: Option<String> },
 }
 
-/// A file to send. The caller opens it (on Android this may be a `content://`
-/// URI resolved by the platform), so this crate never needs to know how.
+/// A file to send.
 pub struct OutgoingFile {
     pub name: String,
     pub size: u64,
     pub mime_type: String,
-    pub file: std::fs::File,
+    pub source: FileSource,
+}
+
+/// Where an outgoing file's bytes come from.
+pub enum FileSource {
+    /// Opened by the caller (on Android possibly a resolved `content://` URI),
+    /// so this crate never needs to know how.
+    Disk(std::fs::File),
+    /// Chunks pushed by the caller, e.g. a file the web UI holds as a `File`.
+    /// The bounded channel gives backpressure: the pusher waits while the
+    /// network catches up, so memory stays flat. Dropping the sender ends the file.
+    Stream(mpsc::Receiver<Vec<u8>>),
+}
+
+impl OutgoingFile {
+    /// A file fed through `Sender::send`, holding at most `buffered` chunks in memory.
+    pub fn stream(name: String, size: u64, mime_type: String, buffered: usize) -> (Self, mpsc::Sender<Vec<u8>>) {
+        let (tx, rx) = mpsc::channel(buffered.max(1));
+        (Self { name, size, mime_type, source: FileSource::Stream(rx) }, tx)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -173,6 +191,9 @@ pub(crate) struct Inner {
     http: reqwest::Client,
     shutdown: watch::Sender<bool>,
     announce_now: Notify,
+    /// The runtime the engine was started on. Used for spawning so engine
+    /// methods are safe to call from any thread (e.g. a UI's main thread).
+    runtime: tokio::runtime::Handle,
 }
 
 impl Inner {
@@ -290,6 +311,7 @@ impl LanEngine {
             http,
             shutdown,
             announce_now: Notify::new(),
+            runtime: tokio::runtime::Handle::current(),
         });
 
         tokio::spawn(server::serve(inner.clone(), listener));
@@ -413,7 +435,7 @@ impl LanEngine {
         self.inner.outgoing.lock().unwrap().insert(transfer_id.clone(), cancel_tx);
         let inner = self.inner.clone();
         let id = transfer_id.clone();
-        tokio::spawn(async move {
+        self.inner.runtime.spawn(async move {
             let result = client::send(&inner, &id, &peer, files, tap_token, cancel_rx).await;
             inner.outgoing.lock().unwrap().remove(&id);
             let error = result.err();

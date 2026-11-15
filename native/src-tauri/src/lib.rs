@@ -27,6 +27,8 @@ pub fn run() {
             commands::lan_peers,
             commands::lan_refresh,
             commands::lan_send,
+            commands::lan_send_web,
+            commands::lan_push_chunk,
             commands::lan_respond,
             commands::lan_cancel,
             commands::nfc_read_tap,

@@ -602,6 +602,7 @@ export default function TransferTestPage() {
               {nativeApp && (
                 <NativePanel
                   signalingId={SESSION_ID}
+                  selectedFiles={selectedFiles}
                   onTapRtc={connectAfterTap}
                   onLanPeersChange={updateLanPeers}
                   onLog={addLog}

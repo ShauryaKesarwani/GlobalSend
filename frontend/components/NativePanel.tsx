@@ -26,13 +26,15 @@ function errorText(error: unknown) {
 
 type Props = {
   signalingId: string;
+  /** Files already chosen at the bottom of the page; sent instead of opening a picker. */
+  selectedFiles: File[];
   /** Tapped device isn't on this network: continue over WebRTC. */
   onTapRtc: (result: TapResult) => void;
   onLanPeersChange: (peers: LanPeer[]) => void;
   onLog: (message: string) => void;
 };
 
-export function NativePanel({ signalingId, onTapRtc, onLanPeersChange, onLog }: Props) {
+export function NativePanel({ signalingId, selectedFiles, onTapRtc, onLanPeersChange, onLog }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [editingName, setEditingName] = useState(false);
@@ -104,12 +106,21 @@ export function NativePanel({ signalingId, onTapRtc, onLanPeersChange, onLog }: 
     }
   };
 
+  const sendLabel = selectedFiles.length ? `Send ${selectedFiles.length} file${selectedFiles.length === 1 ? "" : "s"}` : "Choose files";
+
+  // Sends the files selected at the bottom of the page, or asks for some first.
   const sendTo = async (peer: LanPeer, tapToken?: string) => {
     try {
-      const paths = await native.pickFiles();
-      if (!paths.length) return;
-      await native.lanSend(peer.id, paths, tapToken);
-      onLog(`LAN: sending ${paths.length} file(s) to ${peer.alias}${tapToken ? " (tap, no prompt)" : ""}`);
+      let count = selectedFiles.length;
+      if (count) {
+        await native.lanSendWeb(peer.id, selectedFiles, tapToken);
+      } else {
+        const paths = await native.pickFiles();
+        if (!paths.length) return;
+        count = paths.length;
+        await native.lanSend(peer.id, paths, tapToken);
+      }
+      onLog(`LAN: sending ${count} file(s) to ${peer.alias}${tapToken ? " (tap, no prompt)" : ""}`);
     } catch (error) {
       toast.error(errorText(error));
     }
@@ -194,7 +205,7 @@ export function NativePanel({ signalingId, onTapRtc, onLanPeersChange, onLog }: 
                 onClick={() => { void sendTo(tapped.peer, tapped.token); setTapped(null); }}
                 className="rounded-full bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-500"
               >
-                Choose files
+                {sendLabel}
               </button>
             </div>
           ) : (
@@ -221,7 +232,7 @@ export function NativePanel({ signalingId, onTapRtc, onLanPeersChange, onLog }: 
               <div className="text-xs text-stone-500">{peer.platform} · {peer.address}</div>
             </div>
             <button onClick={() => void sendTo(peer)} className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700">
-              Send files
+              {sendLabel}
             </button>
           </div>
         ))}
@@ -250,9 +261,9 @@ export function NativePanel({ signalingId, onTapRtc, onLanPeersChange, onLog }: 
                     <button onClick={() => void native.lanCancel(t.id)} className="underline">Cancel</button>
                   )}
                 </div>
-                {t.direction === "receive" && t.status === "done" && t.saved.length > 0 && (
-                  <div className="mt-1 break-all text-xs text-stone-500">Saved to {settings?.downloadDir}</div>
-                )}
+                {t.saved.map((file) => (
+                  <div key={file.path} className="mt-1 break-all text-xs text-stone-500">Saved: {file.path}</div>
+                ))}
               </div>
             );
           })}

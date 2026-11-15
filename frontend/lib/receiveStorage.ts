@@ -1,3 +1,4 @@
+import { randomId } from "@/lib/randomId";
 export type ReceiveSink = {
   write(data: Blob): Promise<void>;
   finish(): Promise<File>;
@@ -17,7 +18,7 @@ export async function openReceiveSink(size: number, storage = typeof navigator =
     }
     const root = await storage.getDirectory();
     directory = await root.getDirectoryHandle("globalsend-received", { create: true });
-    name = crypto.randomUUID();
+    name = randomId();
     const handle = await directory.getFileHandle(name, { create: true });
     stream = await handle.createWritable();
     const targetDirectory = directory;

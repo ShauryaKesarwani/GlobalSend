@@ -9,13 +9,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_util::StreamExt;
+use bytes::Bytes;
+use futures_util::{StreamExt, stream::BoxStream};
 use reqwest::StatusCode;
 use tokio::sync::watch;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
 
 use super::{
-    Direction, Inner, LanError, LanEvent, LanPeer, OutgoingFile,
+    Direction, FileSource, Inner, LanError, LanEvent, LanPeer, OutgoingFile,
     protocol::{ACCEPT_TIMEOUT, API, DeviceAnnouncement, FileMeta, PROTOCOL, PrepareRequest, PrepareResponse},
 };
 
@@ -126,7 +128,7 @@ pub(crate) async fn send(
 
     let transferred = Arc::new(AtomicU64::new(0));
     for (meta, file) in metas.into_iter().zip(files) {
-        let body = progress_body(inner.clone(), transfer_id.to_owned(), meta.id.clone(), file.file, transferred.clone(), total_size);
+        let body = progress_body(inner.clone(), transfer_id.to_owned(), meta.id.clone(), file.source, transferred.clone(), total_size);
         let upload = inner
             .http
             .post(url(addr, "upload"))
@@ -161,12 +163,16 @@ fn progress_body(
     inner: Arc<Inner>,
     transfer_id: String,
     file_id: String,
-    file: std::fs::File,
+    source: FileSource,
     transferred: Arc<AtomicU64>,
     total_size: u64,
 ) -> reqwest::Body {
+    let bytes: BoxStream<'static, std::io::Result<Bytes>> = match source {
+        FileSource::Disk(file) => ReaderStream::with_capacity(tokio::fs::File::from_std(file), READ_CHUNK).boxed(),
+        FileSource::Stream(rx) => ReceiverStream::new(rx).map(|chunk| Ok(Bytes::from(chunk))).boxed(),
+    };
     let mut last_emit = Instant::now();
-    let stream = ReaderStream::with_capacity(tokio::fs::File::from_std(file), READ_CHUNK).map(move |chunk| {
+    let stream = bytes.map(move |chunk| {
         if let Ok(bytes) = &chunk {
             let done = transferred.fetch_add(bytes.len() as u64, Ordering::Relaxed) + bytes.len() as u64;
             if last_emit.elapsed() >= PROGRESS_INTERVAL || done >= total_size {

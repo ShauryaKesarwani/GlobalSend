@@ -1,10 +1,10 @@
 //! Long-lived native state: settings, the LAN engine and the NFC tag payload.
 
-use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 
 use globalsend_core::{
     device::DeviceInfo,
-    lan::{LanConfig, LanEngine},
+    lan::{LanConfig, LanEngine, LanEvent},
     settings::Settings,
     tap::TapAuth,
 };
@@ -22,6 +22,8 @@ pub struct NativeState {
     pub settings: Mutex<Settings>,
     pub settings_path: PathBuf,
     pub download_dir: PathBuf,
+    /// Chunk senders for files the web UI streams in, keyed by (transfer id, file index).
+    pub uploads: Mutex<HashMap<(String, usize), tokio::sync::mpsc::Sender<Vec<u8>>>>,
 }
 
 impl NativeState {
@@ -43,13 +45,36 @@ impl NativeState {
         let emitter = app.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(event) = events.recv().await {
+                // On Android files land in the app's private folder first; move each
+                // into the public Download/GlobalSend folder before telling the UI.
+                if let LanEvent::FileReceived { transfer_id, file_id, name, path } = event {
+                    let app = emitter.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let path = match app.gs_nfc().publish_download(&path, &name).await {
+                            Ok(public) => public,
+                            Err(err) => {
+                                log::warn!("could not move {name} to Downloads: {err}");
+                                path
+                            }
+                        };
+                        let _ = app.emit(LAN_EVENT, &LanEvent::FileReceived { transfer_id, file_id, name, path });
+                    });
+                    continue;
+                }
                 if let Err(err) = emitter.emit(LAN_EVENT, &event) {
                     log::warn!("could not forward LAN event: {err}");
                 }
             }
         });
 
-        let state = Self { engine, tap, settings: Mutex::new(settings), settings_path, download_dir };
+        let state = Self {
+            engine,
+            tap,
+            settings: Mutex::new(settings),
+            settings_path,
+            download_dir,
+            uploads: Mutex::new(HashMap::new()),
+        };
         state.sync_tap_payload(app);
 
         let refresher = app.clone();

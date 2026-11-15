@@ -9,7 +9,7 @@ use std::{
 
 use globalsend_core::{
     device::Platform,
-    lan::{Direction, LanConfig, LanEngine, LanEvent, OutgoingFile},
+    lan::{Direction, FileSource, LanConfig, LanEngine, LanEvent, OutgoingFile},
     tap::TapAuth,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -75,7 +75,7 @@ fn outgoing(dir: &Path, name: &str, bytes: &[u8]) -> OutgoingFile {
         name: name.to_owned(),
         size: bytes.len() as u64,
         mime_type: "application/octet-stream".into(),
-        file: std::fs::File::open(path).unwrap(),
+        source: FileSource::Disk(std::fs::File::open(path).unwrap()),
     }
 }
 
@@ -181,4 +181,38 @@ async fn multicast_discovery_finds_peers() {
     // Leaving removes the peer right away.
     b.engine.shutdown().await;
     next_matching(&mut a.events, |e| matches!(e, LanEvent::PeersChanged { peers } if !peers.iter().any(|p| p.id == b_id))).await;
+}
+
+/// Regression: the app called send_files from its main thread (no Tokio
+/// context) and the engine's tokio::spawn panicked, crashing the app.
+#[tokio::test(flavor = "multi_thread")]
+async fn send_files_works_from_a_thread_outside_the_runtime() {
+    let mut a = node("alpha", None).await;
+    let mut b = node("bravo", None).await;
+    a.engine.probe(addr(&b), None).await.unwrap();
+    let engine = a.engine.clone();
+    let (b_id, token) = (b.id.clone(), b.tap.issue());
+    let file = outgoing(a.dir.path(), "t.txt", b"thread");
+    std::thread::spawn(move || engine.send_files(&b_id, vec![file], Some(token)).unwrap()).join().unwrap();
+    let (ok, err) = finished(&next_matching(&mut b.events, |e| finished(e, Direction::Receive).is_some()).await, Direction::Receive).unwrap();
+    assert!(ok, "{err:?}");
+    let _ = next_matching(&mut a.events, |e| finished(e, Direction::Send).is_some()).await;
+}
+
+/// Files held by the web UI are pushed in chunks instead of opened from disk.
+#[tokio::test]
+async fn streams_pushed_chunks() {
+    let a = node("alpha", None).await;
+    let mut b = node("bravo", None).await;
+    a.engine.probe(addr(&b), None).await.unwrap();
+    let data: Vec<u8> = (0..1_000_000u32).map(|i| (i % 7) as u8).collect();
+    let (file, tx) = OutgoingFile::stream("web.bin".into(), data.len() as u64, "application/octet-stream".into(), 2);
+    a.engine.send_files(&b.id, vec![file], Some(b.tap.issue())).unwrap();
+    for chunk in data.chunks(64 * 1024) {
+        tx.send(chunk.to_vec()).await.unwrap();
+    }
+    drop(tx);
+    let (ok, err) = finished(&next_matching(&mut b.events, |e| finished(e, Direction::Receive).is_some()).await, Direction::Receive).unwrap();
+    assert!(ok, "{err:?}");
+    assert_eq!(std::fs::read(b.dir.path().join("received").join("web.bin")).unwrap(), data);
 }

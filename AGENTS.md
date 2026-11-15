@@ -38,7 +38,8 @@ Guide for AI coding agents working in this repo. Read this first.
 
 - **The server never handles file bytes.** No upload endpoints in `backend/`.
 - **Never send client IP addresses to other clients.** Only the `nearby` boolean (see `backend/src/presence/network.ts`).
-- **Native app:** file bytes never cross the Tauri IPC boundary; the Rust engine streams disk ↔ network. The webview only gets progress events.
+- **Native app:** the Rust engine streams disk ↔ network. File bytes cross the Tauri IPC boundary only as bounded base64 chunks with backpressure (`lan_send_web` / `lan_push_chunk`, for files the page holds as `File`). Android IPC is text-only, so never rely on raw byte payloads. Never send a whole file in one call. The webview only gets progress events back.
+- **Native app:** engine methods may be called from any thread. Spawn on the engine's runtime handle, never bare `tokio::spawn` in code reachable from sync Tauri commands.
 - **NFC tokens:** the Kotlin code (`plugins/nfc/.../TapProtocol.kt`) must stay byte-compatible with `tap.rs`. Both files carry the same test vector, so change them together.
 - **Platform-specific features** (NFC, LAN) light up only where the device supports them. Check availability (`isNativeApp()`, `isWebNfcSupported()`, `nfc.supported`) instead of forking the UI.
 
