@@ -8,7 +8,7 @@ No installs. No accounts. No files touching a server. Just open a tab, pick a pe
 
 <br />
 
-[![Status](https://img.shields.io/badge/status-active%20development-f59e0b?style=for-the-badge)](#-roadmap)
+[![Status](https://img.shields.io/badge/status-active%20development-f59e0b?style=for-the-badge)](#%EF%B8%8F-timeline)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-22c55e?style=for-the-badge)](#-license)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-6366f1?style=for-the-badge)](#-contributing)
 
@@ -116,20 +116,46 @@ The transfer lifecycle, one line per step:
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Timeline
 
-Planned and in‑progress work:
+Where GlobalSend is and where it's going. ✅ = on `main` (deployed), 🚧 = on the
+`feat/mobile-app` branch (working, being tested), 🔜 = planned. Details and priorities live in
+[`docs/TODO.md`](docs/TODO.md).
 
-- 🔐 **Optional passphrase‑based app‑layer E2E encryption** on top of the DataChannel
-- ♻️ **Resumable transfers** with chunk‑range reconciliation after a drop
-- 📁 **Folder transfers** and richer multi‑file queueing
-- 🔀 **TURN relay fallback** for the strictest NATs and firewalls (optional coturn configuration)
-- 💾 **Streaming to disk** via the File System Access API (Blob fallback remains for unsupported browsers)
-- 🧾 **Integrity verification** — end‑to‑end checksum before the save prompt
-- 🛡️ **Abuse controls** — invite rate limiting and payload size caps
-- 🚪 **Rooms / contacts** and optional transfer history
+### ✅ Released (`main`)
 
-See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full design document.
+| Milestone | What you get |
+|---|---|
+| **1. Browser-to-browser transfers** | Signaling server, live peer list, invite → accept, direct WebRTC file transfer. Files never touch the server. |
+| **2. Speed** | Parallel data channels (shards), read-ahead on the sender, live transfer speed. |
+| **3. Messages & reach** | Text/link messages over the data channel, QR code to connect, Cloudflare TURN relay for strict networks, PWA share target. |
+| **4. Big files & UX** | Received files stream to disk (no RAM limit), multi-file sends, drag and drop, the transfer dock. |
+| **5. Project** | AGPL-3.0 license, docs folder, deploy on push to `main`. |
+
+### 🚧 In progress (`feat/mobile-app`)
+
+| Milestone | What you get |
+|---|---|
+| **6. Native app** | Tauri v2 app for Windows and Android with the same UI as the website; opens instantly and offline. |
+| **7. LAN** | Devices on the same Wi-Fi find each other automatically and send directly at full Wi-Fi speed, no internet needed. Picked files are read straight from disk. |
+| **8. Tap to send** | NFC tap between Android phones connects instantly without an accept prompt; Chrome on Android can tap an app user too (Web NFC); a phone without the app just opens a link. |
+| **9. Website "Nearby"** | Peers on the same network are marked Nearby and connect directly over the LAN. |
+| **10. Background** | Transfers keep going when you switch apps (progress notification), accept requests from a notification, optional "run in background" modes. |
+| **11. Settings** | Auto-accept after NFC tap or from the local network, download folder (desktop), background mode (Android). |
+
+### 🔜 Coming next
+
+| Milestone | Planned |
+|---|---|
+| **12. Hardware testing & release builds** | Two-phone + PC testing, Android release build config, signed installers. |
+| **13. Share from anywhere** | Android share menu, Android drag and drop, Windows "Send with GlobalSend" right-click menu. |
+| **14. One engine** | Internet (WebRTC) transfers move into the Rust engine too, so the page only shows progress; parallel uploads; encrypted LAN traffic. |
+| **15. Works with others** | LocalSend compatibility; Quick Share interop on desktop (experimental). |
+| **16. People** | Favourite devices, optional accounts with favourite contacts by email. |
+| **17. Everywhere** | CLI/TUI in the desktop install, Linux and macOS builds, iOS (needs a Mac). |
+| **18. Transfer quality** | End-to-end encryption option, resumable transfers, folders, checksums, abuse controls. |
+
+See [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) for the original design document.
 
 ---
 

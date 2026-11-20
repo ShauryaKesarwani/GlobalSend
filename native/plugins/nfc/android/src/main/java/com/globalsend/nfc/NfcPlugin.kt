@@ -9,7 +9,12 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.WebView
+import android.graphics.Color
+import android.view.View
 import androidx.core.app.ActivityCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.ContextCompat
 import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
@@ -68,6 +73,9 @@ class PublishArgs {
   lateinit var path: String
   lateinit var name: String
 }
+
+/** Matches the top of the page background (`/test`), shown behind the system bars. */
+private const val BAR_COLOR = "#F6F3EB"
 
 @TauriPlugin
 class NfcPlugin(private val activity: Activity) : Plugin(activity) {
@@ -130,12 +138,36 @@ class NfcPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   override fun load(webView: WebView) {
+    activity.runOnUiThread { keepContentOutOfSystemBars(webView) }
     // Android 13+: needed to show transfer progress while in the background.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
       ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
     ) {
       ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7302)
     }
+  }
+
+  /**
+   * Android 15+ draws apps edge-to-edge, so the page would start under the
+   * status bar and its top buttons would be hard to press. Pad the webview's
+   * container by the system bars (and the keyboard at the bottom) and paint
+   * that strip in the page colour, so it still looks full screen.
+   */
+  private fun keepContentOutOfSystemBars(webView: WebView) {
+    val container = webView.parent as? View ?: webView
+    container.setBackgroundColor(Color.parseColor(BAR_COLOR))
+    ViewCompat.setOnApplyWindowInsetsListener(container) { view, insets ->
+      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+      view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+      WindowInsetsCompat.CONSUMED
+    }
+    // Light background, so use dark status and navigation bar icons.
+    WindowCompat.getInsetsController(activity.window, container).apply {
+      isAppearanceLightStatusBars = true
+      isAppearanceLightNavigationBars = true
+    }
+    ViewCompat.requestApplyInsets(container)
   }
 
   /** Real file name of a picked content:// URI (the URI itself is often just an id). */
